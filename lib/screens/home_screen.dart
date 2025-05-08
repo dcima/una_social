@@ -383,7 +383,7 @@ class _HomeScreenState extends State<HomeScreen> {
             fillColor: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
           ),
           onSubmitted: (value) {
-            /* TODO: Implement search functionality */ print("Search submitted: $value");
+            print("Search submitted: $value");
           },
         ),
       ),

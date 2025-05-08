@@ -2,24 +2,26 @@
 
 // ignore_for_file: avoid_print
 
-import 'dart:convert';
+import 'dart:convert'; // Mantenuto per potenziale uso futuro
 
 class Personale {
-  final String universita; // Added
-  final int id; // Changed to int
-  final String cognome; // Added
-  final String nome; // Added
-  final int struttura; // Added
-  final String? photoUrl; // Kept
-  final String? cv; // Added
-  final List<String> emails; // Changed to List<String>
-  final String? noteBiografiche; // Added
-  final String? rss; // Added
-  final List<String> ruoli; // Added, changed to List<String>
-  final List<String> telefoni; // Added, changed to List<String>
-  final String? web; // Added
+  final String uuid; // Nuovo campo, da SQL
+  final String universita;
+  final int id; // SQL 'bigint null', ma manteniamo int con fallback per coerenza
+  final String cognome;
+  final String nome;
+  final int struttura; // SQL 'bigint null', ma manteniamo int con fallback
+  final String? photoUrl;
+  final String? cv;
+  final List<Map<String, String>> emails; // jsonb null -> List (può essere vuota)
+  final String? noteBiografiche;
+  final String? rss;
+  final List<String> ruoli; // jsonb null -> List (può essere vuota)
+  final List<Map<String, String>> telefoni; // jsonb null -> List (può essere vuota)
+  final String? web;
 
   Personale({
+    required this.uuid, // Aggiunto required
     required this.universita,
     required this.id,
     required this.cognome,
@@ -35,56 +37,66 @@ class Personale {
     this.web,
   });
 
-  // Convenient getter for full name
   String get fullName => '$nome $cognome';
 
   factory Personale.fromJson(Map<String, dynamic> json) {
-    // Helper function to safely cast lists
+    // Helper function to safely cast lists of strings (per 'ruoli')
     List<String> safeStringList(dynamic value) {
+      if (value == null) return []; // Gestisce null esplicitamente
       if (value is List) {
-        // If it's already a list, process it
         return value.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
       } else if (value is String) {
-        // If it's a string, try to decode it as JSON
         try {
           final decoded = jsonDecode(value);
           if (decoded is List) {
-            // If decoding results in a list, process it
             return decoded.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
           }
         } catch (e) {
-          // JSON decoding failed, treat as empty or handle error
-          print("Warning: Could not decode string as JSON list: $value - $e");
-          return [];
+          print("Attenzione: Impossibile decodificare la stringa JSON per safeStringList: $value - $e");
         }
       }
-      // Return empty list for null or other unexpected types
       return [];
     }
 
-    // Add a print statement here for debugging the type
-    print("DEBUG: Type of json['telefoni']: ${json['telefoni'].runtimeType}");
-    print("DEBUG: Value of json['telefoni']: ${json['telefoni']}");
+    // Helper function to safely cast lists of maps (per 'emails' e 'telefoni')
+    List<Map<String, String>> safeMapList(dynamic value) {
+      if (value == null) return []; // Gestisce null esplicitamente
+      if (value is List) {
+        return value.where((item) => item is Map).map((item) {
+          final Map<dynamic, dynamic> dynamicMap = item as Map;
+          return dynamicMap.map((key, val) => MapEntry(key.toString(), val?.toString() ?? ''));
+        })
+            // Opzionale: filtra se il valore è vuoto. Considera se necessario per la tua logica.
+            // .where((map) => (map['valore'] ?? '').isNotEmpty)
+            .toList();
+      }
+      // Non tentiamo di decodificare stringhe JSON qui, ci aspettiamo che Supabase/DB
+      // deserializzi correttamente i campi jsonb in List<Map> o List<dynamic>.
+      return [];
+    }
 
     return Personale(
-      universita: json['università'] as String? ?? '',
-      id: json['id'] as int,
-      cognome: json['cognome'] as String? ?? '',
-      nome: json['nome'] as String? ?? '',
-      struttura: json['struttura'] as int? ?? 0,
-      photoUrl: json['photoUrl'] as String?,
-      cv: json['cv'] as String?,
-      emails: safeStringList(json['emails']), // Keep using for emails too
-      noteBiografiche: json['noteBiografiche'] as String?,
-      rss: json['rss'] as String?,
-      ruoli: safeStringList(json['ruoli']), // Keep using for ruoli too
-      telefoni: safeStringList(json['telefoni']), // Use the updated helper
-      web: json['web'] as String?,
+      // uuid è 'not null' nel DB, quindi ci aspettiamo sia sempre presente nel JSON dal DB.
+      // Se il JSON potesse non averlo, dovresti renderlo String? e gestire json['uuid'] as String?
+      uuid: json['uuid'] as String? ?? '', // Fallback se per qualche motivo fosse null, ma db dice not null
+      universita: json['università'] as String? ?? '', // SQL 'text null'
+      id: (json['id'] as num?)?.toInt() ?? 0, // SQL 'bigint null'
+      cognome: json['cognome'] as String? ?? '', // SQL 'text null'
+      nome: json['nome'] as String? ?? '', // SQL 'text null'
+      struttura: (json['struttura'] as num?)?.toInt() ?? 0, // SQL 'bigint null'
+      photoUrl: json['photoUrl'] as String?, // SQL '"photoUrl" text null'
+      cv: json['cv'] as String?, // SQL 'cv text null'
+      emails: safeMapList(json['emails']), // SQL 'emails jsonb null'
+      noteBiografiche: json['noteBiografiche'] as String?, // SQL '"noteBiografiche" text null'
+      rss: json['rss'] as String?, // SQL 'rss text null'
+      ruoli: safeStringList(json['ruoli']), // SQL 'ruoli jsonb null'
+      telefoni: safeMapList(json['telefoni']), // SQL 'telefoni jsonb null'
+      web: json['web'] as String?, // SQL 'web text null'
     );
   }
 
-  // Optional: Add a toJson method if you need to serialize
   Map<String, dynamic> toJson() => {
+        'uuid': uuid, // Aggiunto
         'università': universita,
         'id': id,
         'cognome': cognome,
@@ -92,6 +104,10 @@ class Personale {
         'struttura': struttura,
         'photoUrl': photoUrl,
         'cv': cv,
+        // Per i campi JSONB, assicurati che siano serializzati come stringhe JSON
+        // se il backend si aspetta una stringa JSON, altrimenti lasciali come liste/mappe
+        // se il driver/ORM del database gestisce la conversione.
+        // Supabase dovrebbe gestire List<Map> e List<String> direttamente per jsonb.
         'emails': emails,
         'noteBiografiche': noteBiografiche,
         'rss': rss,
@@ -102,7 +118,6 @@ class Personale {
 
   @override
   String toString() {
-    // Make debugging easier
-    return 'Personale(id: $id, nome: $nome, cognome: $cognome, universita: $universita, struttura: $struttura, emails: $emails, ruoli: $ruoli, telefoni: $telefoni, photoUrl: $photoUrl, cv: $cv, web: $web, noteBiografiche: $noteBiografiche, rss: $rss)';
+    return 'Personale(uuid: $uuid, id: $id, nome: $nome, cognome: $cognome, universita: $universita, struttura: $struttura, emails: $emails, ruoli: $ruoli, telefoni: $telefoni, photoUrl: $photoUrl, cv: $cv, web: $web, noteBiografiche: $noteBiografiche, rss: $rss)';
   }
 }

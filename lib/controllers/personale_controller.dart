@@ -1,8 +1,6 @@
 // Controller GetX
 // ignore_for_file: avoid_print
 
-import 'dart:convert';
-
 import 'package:get/get_rx/src/rx_types/rx_types.dart';
 import 'package:get/get_state_manager/src/simple/get_controllers.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -24,6 +22,47 @@ class PersonaleController extends GetxController {
     // TODO: subscribe a real-time count di utenti collegati
   }
 
+  Future<Personale?> findPersonaleByEmailValueRpc(String targetEmailValue) async {
+    print('Searching for email value via RPC: $targetEmailValue');
+
+    try {
+      // NO .select() here
+      final response = await supabase.rpc(
+        'search_personale_by_email_value',
+        params: {'target_email': targetEmailValue},
+      ).maybeSingle();
+
+      // If PostgrestException (PGRST116) was not thrown, it means exactly one row was returned.
+      // 'response' will be the Map<String, dynamic> for that row.
+      print('Record trovato (RPC): $response');
+      return Personale.fromJson(response as Map<String, dynamic>);
+    } on PostgrestException catch (error) {
+      if (error.code == 'PGRST116') {
+        if (error.message.contains("0 rows")) {
+          print('Nessun record trovato con il valore email specificato (RPC - PGRST116 for 0 rows).');
+          return null; // Correctly interpret as "not found"
+        } else if (error.message.contains("multiple")) {
+          // Check if "multiple" is in the message
+          print('ERRORE (RPC - PGRST116 for multiple rows): Più record trovati per l\'email: $targetEmailValue. Controllare i dati e la logica della funzione PG.');
+          print('Details: ${error.details}, Hint: ${error.hint}, Message: ${error.message}');
+          return null; // Or throw a more specific application error
+        } else {
+          print('Errore Postgrest (PGRST116, messaggio non standard) durante la ricerca (RPC): $error');
+          print('Details: ${error.details}, Hint: ${error.hint}, Message: ${error.message}');
+          return null;
+        }
+      } else {
+        print('Errore Postgrest (diverso da PGRST116) durante la ricerca (RPC): $error');
+        print('Details: ${error.details}, Hint: ${error.hint}, Code: ${error.code}, Message: ${error.message}');
+        return null;
+      }
+    } catch (err, stackTrace) {
+      print('Errore generico imprevisto durante la ricerca (RPC): $err');
+      print('Stack trace: $stackTrace');
+      return null;
+    }
+  }
+
   Future<void> _loadUserData() async {
     message.value = ''; // Clear previous message
     personale.value = null; // Clear previous data while loading
@@ -36,20 +75,12 @@ class PersonaleController extends GetxController {
     }
 
     final email = user.email!;
-    final jsonEmailArray = '[${jsonEncode(email)}]';
-
-    if (jsonEmailArray.isEmpty) {
-      message.value = 'Email utente non disponibile.';
-      print('Errore: Email utente non disponibile.');
-      return;
-    }
-
-    print('Attempting to load data for email: $jsonEmailArray');
+    final stopwatch = Stopwatch()..start();
 
     try {
-      // Use .contains() with the primitive string value for JSONB array search
-      final record = await supabase.from('personale').select('*').filter('emails', 'cs', jsonEmailArray).maybeSingle(); // Fetches one record or null
-      // final record = await supabase.from('personale').select('*').contains('emails', [email]).maybeSingle(); // Fetches one record or null
+      final record = await findPersonaleByEmailValueRpc(email); // Fetches one record or null
+      stopwatch.stop(); // Ferma lo stopwatch
+      print('Tempo di esecuzione della query: ${stopwatch.elapsed}');
 
       if (record == null) {
         message.value = 'Nessun profilo trovato per l\'email: $email';
@@ -58,7 +89,7 @@ class PersonaleController extends GetxController {
       } else {
         print('Record trovato: $record');
         // Safely parse the record using the updated model
-        personale.value = Personale.fromJson(record);
+        personale.value = Personale.fromJson(record as Map<String, dynamic>);
         print('Personale model caricato: ${personale.value}');
         message.value = ''; // Clear any previous error message on success
       }

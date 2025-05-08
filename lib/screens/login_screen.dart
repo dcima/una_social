@@ -18,7 +18,6 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  // --- NUOVO: Controller per OTP ---
   final _otpController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
@@ -47,20 +46,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // Funzione per Sign In standard con Email/Password
   Future<void> _signIn() async {
-    // Valida solo email e password per questo flusso
     if (!_formKey.currentState!.validate()) {
-      // Se la validazione fallisce SOLO a causa dell'OTP (che non ci interessa qui),
-      // potremmo voler ignorare l'errore OTP. Ma la validazione standard dovrebbe
-      // funzionare correttamente se l'utente non ha toccato il campo OTP.
-      // Se l'utente ha inserito qualcosa nel campo OTP ma preme questo bottone,
-      // la validazione OTP potrebbe fallire. Aggiustiamo la validazione se necessario.
-      // Per ora, assumiamo che la validazione base funzioni.
       final emailValid = _emailController.text.isNotEmpty && _emailController.text.contains('@');
       final passwordValid = _passwordController.text.isNotEmpty && _passwordController.text.length >= 6;
       if (!emailValid || !passwordValid) {
-        // Forse mostra un messaggio specifico se la validazione standard fallisce
-        // ma quella del form generale passerebbe a causa di un OTP non compilato.
-        // Per semplicità, lasciamo il validator standard del TextFormField.
         if (!_formKey.currentState!.validate()) {
           print("Form validation failed for Email/Password sign in.");
           return;
@@ -90,12 +79,10 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // --- NUOVO: Funzione per verificare l'OTP dell'invito ---
   Future<void> _verifyOtpInvite() async {
     final email = _emailController.text.trim();
     final otp = _otpController.text.trim();
 
-    // Validazione specifica per questo flusso
     if (email.isEmpty || !email.contains('@')) {
       _showErrorSnackBar('Inserisci un\'email valida per verificare il codice.');
       return;
