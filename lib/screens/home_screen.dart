@@ -1,4 +1,4 @@
-// ignore_for_file: avoid_print, deprecated_member_use
+// ignore_for_file: avoid_print, deprecated_member_use, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -537,15 +537,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 try {
                                   await Supabase.instance.client.auth.signOut();
                                   // Use GoRouter to navigate back to login after logout
-                                  if (mounted) {
-                                    // Ensure widget is still in tree
-                                    GoRouter.of(context).go('/login');
-                                  }
+                                  if (!mounted) return;
+                                  GoRouter.of(context).go('/login');
                                 } catch (e) {
                                   print("Errore durante logout: $e");
-                                  if (mounted) {
-                                    _showSnackbar(context, "Errore logout: ${e is AuthException ? e.message : e.toString()}", isError: true);
-                                  }
+                                  if (!mounted) return;
+                                  _showSnackbar(context, "Errore logout: ${e is AuthException ? e.message : e.toString()}", isError: true);
                                 }
                                 break;
                               case ProfileAction.version:

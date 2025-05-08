@@ -306,6 +306,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
           const SnackBar(content: Text('Profilo aggiornato!'), backgroundColor: Colors.green),
         );
         await _personaleController.reload();
+        if (!mounted) return;
         Navigator.of(context).pop();
       }
     } catch (e) {
@@ -473,26 +474,24 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
                     child: Text('Nessuna email aggiunta.', style: TextStyle(color: Colors.grey[600])),
                   ),
-                ..._emailEntries
-                    .map((entry) => _buildContactEntryRow(
-                          entry: entry,
-                          valueLabel: 'Email',
-                          tagHint: 'Es. Lavoro, Personale',
-                          valueHint: 'indirizzo@email.com',
-                          onRemove: () => _removeEmailEntry(entry),
-                          valueInputType: TextInputType.emailAddress,
-                          valueIcon: Icons.email,
-                          valueValidator: (value) {
-                            if (value != null && value.trim().isNotEmpty && !GetUtils.isEmail(value.trim())) {
-                              return 'Formato email non valido';
-                            }
-                            // Rendi l'email obbligatoria se il tag è presente o viceversa?
-                            // O semplicemente ignora le entry con valore vuoto al salvataggio.
-                            // Per ora, la validazione è solo sul formato se non vuoto.
-                            return null;
-                          },
-                        ))
-                    .toList(),
+                ..._emailEntries.map((entry) => _buildContactEntryRow(
+                      entry: entry,
+                      valueLabel: 'Email',
+                      tagHint: 'Es. Lavoro, Personale',
+                      valueHint: 'indirizzo@email.com',
+                      onRemove: () => _removeEmailEntry(entry),
+                      valueInputType: TextInputType.emailAddress,
+                      valueIcon: Icons.email,
+                      valueValidator: (value) {
+                        if (value != null && value.trim().isNotEmpty && !GetUtils.isEmail(value.trim())) {
+                          return 'Formato email non valido';
+                        }
+                        // Rendi l'email obbligatoria se il tag è presente o viceversa?
+                        // O semplicemente ignora le entry con valore vuoto al salvataggio.
+                        // Per ora, la validazione è solo sul formato se non vuoto.
+                        return null;
+                      },
+                    )),
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
@@ -511,21 +510,20 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
                     child: Text('Nessun telefono aggiunto.', style: TextStyle(color: Colors.grey[600])),
                   ),
-                ..._phoneEntries
-                    .map((entry) => _buildContactEntryRow(
-                          entry: entry,
-                          valueLabel: 'Numero Telefono',
-                          tagHint: 'Es. Cellulare, Ufficio',
-                          valueHint: 'Numero di telefono',
-                          onRemove: () => _removePhoneEntry(entry),
-                          valueInputType: TextInputType.phone,
-                          valueIcon: Icons.phone,
-                          valueValidator: (value) {
-                            // Aggiungi validazioni specifiche per numeri di telefono se necessario
-                            return null;
-                          },
-                        ))
-                    .toList(),
+                ..._phoneEntries.map((entry) => _buildContactEntryRow(
+                      entry: entry,
+                      valueLabel: 'Numero Telefono',
+                      tagHint: 'Es. Cellulare, Ufficio',
+                      valueHint: 'Numero di telefono',
+                      onRemove: () => _removePhoneEntry(entry),
+                      valueInputType: TextInputType.phone,
+                      valueIcon: Icons.phone,
+                      valueValidator: (value) {
+                        // Aggiungi validazioni specifiche per numeri di telefono se necessario
+                        return null;
+                      },
+                    )),
+
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
