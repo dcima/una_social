@@ -1,12 +1,17 @@
-// Controller GetX
-// ignore_for_file: avoid_print
+// controller: personale_controller.dart
+// ignore_for_file: avoid_print, non_constant_identifier_names
+
+import 'dart:async'; // Aggiunto per Timer se necessario in futuro, per ora non usato.
 
 import 'package:get/get_rx/src/rx_types/rx_types.dart';
 import 'package:get/get_state_manager/src/simple/get_controllers.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social_app/models/personale.dart'; // Assicurati che il path sia corretto
-// We will avoid relying on the specific SinglePresenceState type for now
+import 'package:una_social_app/models/personale.dart';
+// È buona pratica importare i tipi specifici se li si usa esplicitamente,
+// anche se supabase_flutter potrebbe riesportarli.
+// Ad esempio, se si fa riferimento a `Presence` nel codice:
+// import 'package:realtime_client/src/types.dart' show Presence; // Percorso effettivo potrebbe variare
 
 class PersonaleController extends GetxController {
   final supabase = Supabase.instance.client;
@@ -18,6 +23,10 @@ class PersonaleController extends GetxController {
   RealtimeChannel? _onlineUsersChannel;
   bool _isPresenceChannelReady = false;
 
+  // Manteniamo _activeUserIds, popolato da JOIN/LEAVE.
+  // L'evento SYNC tenterà di riconciliare questo set con lo stato completo da presenceState().
+  final Set<String> _activeUserIds = {};
+
   @override
   void onInit() {
     print('PersonaleController: onInit()');
@@ -25,9 +34,31 @@ class PersonaleController extends GetxController {
     _loadUserData().then((_) {
       if (supabase.auth.currentUser != null) {
         _subscribeToOnlineUsers();
+      } else {
+        print("PersonaleController.onInit: Utente non loggato, non mi iscrivo a presence.");
       }
     });
     _loadAppVersion();
+
+    supabase.auth.onAuthStateChange.listen((data) {
+      final AuthChangeEvent event = data.event;
+      print("PersonaleController.onAuthStateChange: Evento $event");
+      if (event == AuthChangeEvent.signedIn) {
+        _activeUserIds.clear(); // Pulisci ID attivi per nuovo login
+        if (personale.value == null) {
+          // Evita caricamenti ridondanti se dati già presenti
+          _loadUserData().then((_) {
+            if (supabase.auth.currentUser != null) _subscribeToOnlineUsers();
+          });
+        } else {
+          if (supabase.auth.currentUser != null) _subscribeToOnlineUsers();
+        }
+      } else if (event == AuthChangeEvent.signedOut) {
+        _unsubscribeFromOnlineUsers(); // Questo pulirà _activeUserIds e aggiornerà il contatore
+        personale.value = null;
+        message.value = 'Utente disconnesso.';
+      }
+    });
   }
 
   @override
@@ -41,237 +72,349 @@ class PersonaleController extends GetxController {
     print('PersonaleController: _subscribeToOnlineUsers()');
     final userId = supabase.auth.currentUser?.id;
     if (userId == null) {
-      print("AUTH: Utente non autenticato, impossibile iscriversi alla presence.");
-      return;
-    }
-
-    if (_onlineUsersChannel != null && _isPresenceChannelReady) {
-      print("CANALE: Già sottoscritto e pronto per 'online-users'.");
-      return;
-    }
-
-    if (_onlineUsersChannel != null) {
-      print("CANALE: Rimozione canale 'online-users' esistente.");
-      supabase.removeChannel(_onlineUsersChannel!);
-      _onlineUsersChannel = null;
+      print("  AUTH: Utente non autenticato, impossibile iscriversi.");
       _isPresenceChannelReady = false;
-      connectedUsers.value = 0;
+      _activeUserIds.clear();
+      _updateConnectedUsersCountFromSet(); // Aggiorna il contatore (a 0)
+      return;
     }
 
-    print("CANALE: Creazione e sottoscrizione al canale 'online-users'.");
+    // Se il canale esiste già e il flag indica che è pronto, non fare nulla se non un log e un potenziale refresh.
+    if (_onlineUsersChannel != null && _isPresenceChannelReady) {
+      print("  CANALE: Già sottoscritto e PRONTO. Stampo stato attuale e tento riconciliazione.");
+      _debugPrintFullPresenceState();
+      _reconcileActiveUserIdsFromListSinglePresenceState(); // Assicura coerenza
+      // _updateConnectedUsersCountFromSet(); // reconcile... chiama già update...
+      return;
+    }
+
+    // Se il canale esiste ma non è pronto (es. _isPresenceChannelReady è false),
+    // è meglio rimuoverlo e ricrearlo per garantire uno stato pulito.
+    if (_onlineUsersChannel != null && !_isPresenceChannelReady) {
+      print("  CANALE: Esistente ma non pronto. Rimuovo e ricreo.");
+      supabase.removeChannel(_onlineUsersChannel!); // Non serve await
+      _onlineUsersChannel = null;
+    }
+
+    print("  CANALE: Creazione e sottoscrizione a 'online-users'.");
+    _isPresenceChannelReady = false;
+    _activeUserIds.clear(); // Pulisci prima di una nuova sottoscrizione
     _onlineUsersChannel = supabase.channel(
       'online-users',
-      opts: const RealtimeChannelConfig(ack: true, self: true),
+      opts: const RealtimeChannelConfig(ack: true, self: true), // self:true è importante
     );
 
     _onlineUsersChannel!.onPresenceSync((payload) {
-      print('EVENTO: Presence SYNC ricevuto.');
+      // payload qui è RealtimePresenceSyncPayload
+      print('  EVENTO: Presence SYNC ricevuto.');
       if (!_isPresenceChannelReady) {
-        print("CANALE: Canale considerato PRONTO per la presence dopo il primo SYNC.");
+        print("    CANALE: Canale PRONTO dopo SYNC.");
         _isPresenceChannelReady = true;
       }
-      _updateConnectedUsersCount();
+      // Al SYNC, tentiamo di riconciliare _activeUserIds con lo stato completo.
+      _reconcileActiveUserIdsFromListSinglePresenceState();
+      _debugPrintFullPresenceState(); // Stampa lo stato per investigazione
     }).onPresenceJoin((payload) {
-      print('EVENTO: Presence JOIN ricevuto. Nuove presenze: ${payload.newPresences.length}');
-      if (!_isPresenceChannelReady) {
-        print("CANALE: Canale considerato PRONTO per la presence dopo JOIN.");
+      // payload è RealtimePresenceJoinPayload
+      print('  EVENTO: Presence JOIN. Nuove presenze: ${payload.newPresences.length}');
+      bool changed = false;
+      for (final Presence newPresence in payload.newPresences) {
+        // payload.newPresences è List<Presence>
+        final pLoad = newPresence.payload; // Presence.payload è Map<String, dynamic>
+        if (pLoad.containsKey('user_id') && pLoad['user_id'] is String) {
+          final newUserId = pLoad['user_id'] as String;
+          if (newUserId.isNotEmpty && _activeUserIds.add(newUserId)) {
+            changed = true; // Aggiunto nuovo ID
+          }
+        }
+      }
+      if (!_isPresenceChannelReady && payload.newPresences.isNotEmpty) {
+        print("    CANALE: Canale PRONTO dopo JOIN con dati.");
         _isPresenceChannelReady = true;
       }
-      _updateConnectedUsersCount();
+      if (changed) _updateConnectedUsersCountFromSet();
     }).onPresenceLeave((payload) {
-      print('EVENTO: Presence LEAVE ricevuto. Presenze uscite: ${payload.leftPresences.length}');
-      _updateConnectedUsersCount();
+      // payload è RealtimePresenceLeavePayload
+      print('  EVENTO: Presence LEAVE. Uscite: ${payload.leftPresences.length}');
+      bool changed = false;
+      for (final Presence leftPresence in payload.leftPresences) {
+        // payload.leftPresences è List<Presence>
+        final pLoad = leftPresence.payload; // Presence.payload
+        if (pLoad.containsKey('user_id') && pLoad['user_id'] is String) {
+          final oldUserId = pLoad['user_id'] as String;
+          if (oldUserId.isNotEmpty && _activeUserIds.remove(oldUserId)) {
+            changed = true; // Rimosso ID
+          }
+        }
+      }
+      if (changed) _updateConnectedUsersCountFromSet();
     });
 
     _onlineUsersChannel!.subscribe((status, [error]) async {
-      print("CANALE: Stato sottoscrizione 'online-users' cambiato a: $status.");
+      print("  CANALE: Stato sottoscrizione 'online-users': $status.");
       if (status == RealtimeSubscribeStatus.subscribed) {
-        print('CANALE: Sottoscrizione ad \'online-users\' avvenuta. Tentativo di tracciare la presenza...');
+        print('    CANALE: Sottoscrizione avvenuta. Traccio presenza...');
         try {
           await _onlineUsersChannel!.track({
-            'user_id': userId,
+            'user_id': userId, // userId è garantito non nullo qui
             'online_at': DateTime.now().toIso8601String(),
           });
-          print('CANALE: Presenza utente tracciata con successo su \'online-users\'.');
-          _updateConnectedUsersCount();
+          print('    CANALE: Presenza utente (ID: $userId) tracciata.');
+          // L'evento JOIN per 'self' (dovuto a self:true) popolerà _activeUserIds.
         } catch (e, s) {
-          print('CANALE ERRORE durante il track su \'online-users\': $e');
-          print(s);
-          _isPresenceChannelReady = false;
+          print('    CANALE ERRORE track: $e\n$s');
+          _isPresenceChannelReady = false; // Se track fallisce, il canale potrebbe essere instabile
         }
       } else if (status == RealtimeSubscribeStatus.channelError || status == RealtimeSubscribeStatus.timedOut) {
-        print('CANALE ERRORE: Sottoscrizione ad \'online-users\' fallita: $error, status: $status.');
-        message.value = 'Errore Realtime (connessione utenti): $error';
+        print('    CANALE ERRORE sottoscrizione: $error, status: $status.');
+        message.value = 'Errore Realtime: $error';
         _isPresenceChannelReady = false;
-        connectedUsers.value = 0;
+        _activeUserIds.clear();
+        _updateConnectedUsersCountFromSet();
       } else if (status == RealtimeSubscribeStatus.closed) {
-        print('CANALE: Sottoscrizione ad \'online-users\' CHIUSA.');
+        print('    CANALE: Sottoscrizione CHIUSA.');
         _isPresenceChannelReady = false;
-        connectedUsers.value = 0;
+        _activeUserIds.clear();
+        _updateConnectedUsersCountFromSet();
       }
     });
   }
 
-  // --- METHOD CORRECTED (Treating presenceState items as dynamic/Map) ---
-  void _updateConnectedUsersCount() {
-    print('PersonaleController: _updateConnectedUsersCount()');
+  // Metodo per aggiornare il contatore basato sulla dimensione di _activeUserIds
+  void _updateConnectedUsersCountFromSet() {
+    final newCount = _activeUserIds.length;
+    if (connectedUsers.value != newCount) {
+      connectedUsers.value = newCount;
+    }
+    print('  CONTEGGIO (from _activeUserIds Set): Utenti connessi: ${connectedUsers.value}');
+  }
+
+  // Metodo per riconciliare _activeUserIds usando List<SinglePresenceState>
+  // dove ogni SinglePresenceState ha una proprietà 'presences' che è List<Presence>.
+  void _reconcileActiveUserIdsFromListSinglePresenceState() {
     if (_onlineUsersChannel == null || !_isPresenceChannelReady) {
-      print('CONTEGGIO: Impossibile aggiornare, canale \'online-users\' non pronto (flag: $_isPresenceChannelReady).');
+      print('  RICONCILIAZIONE (List<SinglePresenceState>): Canale non pronto o nullo.');
       return;
     }
 
+    print('  RICONCILIAZIONE (List<SinglePresenceState>): Tentativo...');
     try {
-      // Get the presence state, treat return type as dynamic initially.
-      final dynamic presenceStateResult = _onlineUsersChannel!.presenceState();
-      print('DEBUG CONTEGGIO: presenceState() runtimeType: ${presenceStateResult.runtimeType}');
+      // Otteniamo la lista. Il tipo statico è List<SinglePresenceState> secondo il compilatore.
+      // Accederemo alle sue proprietà dinamicamente basandoci sui log precedenti.
+      final List<dynamic> presenceStateList = _onlineUsersChannel!.presenceState();
+      print('    RICONCILIAZIONE: presenceState() ha restituito Lista di ${presenceStateList.length} elementi.');
 
-      // We expect a List (or JSArray on web which behaves like a List).
-      if (presenceStateResult is! List && presenceStateResult is! Iterable) {
-        print('CONTEGGIO ERRORE: presenceState() non ha restituito una lista/iterable. Trovato: ${presenceStateResult.runtimeType}');
-        // Maybe reset count or handle appropriately
-        // connectedUsers.value = 0;
-        return;
-      }
+      final Set<String> idsExtractedFromState = {};
 
-      // Convert to a standard Dart List<dynamic> for easier processing.
-      // This should handle both native List and JSArray.
-      final List<dynamic> presencesList = List<dynamic>.from(presenceStateResult as Iterable<dynamic>);
+      if (presenceStateList.isEmpty) {
+        // Se lo stato completo è vuoto, _activeUserIds dovrebbe essere vuoto.
+        // Non è detto che _activeUserIds sia già vuoto se un JOIN è appena arrivato.
+      } else {
+        for (final dynamic singleStateItem_dynamic in presenceStateList) {
+          try {
+            final dynamic presencesListProperty = singleStateItem_dynamic.presences;
 
-      final Set<String> uniqueUserIds = {};
-
-      // Iterate over each element in the list. Treat each element as dynamic.
-      for (final dynamic presenceItemRaw in presencesList) {
-        // Attempt to treat the item as a Map. This is the most likely structure.
-        if (presenceItemRaw is Map) {
-          // Cast to Map<String, dynamic> for easier access, but be cautious.
-          // Use null-aware checks for keys.
-          final Map<String, dynamic> presenceItemMap = Map<String, dynamic>.from(presenceItemRaw);
-
-          // Look for the list of payloads. The key is likely 'metas'.
-          final dynamic metasRaw = presenceItemMap['metas'];
-
-          if (metasRaw is List) {
-            final List<dynamic> metas = metasRaw;
-            for (final dynamic metaItem in metas) {
-              if (metaItem is Map<String, dynamic>) {
-                final Map<String, dynamic> userPayload = metaItem;
-                if (userPayload.containsKey('user_id') && userPayload['user_id'] is String) {
-                  uniqueUserIds.add(userPayload['user_id'] as String);
-                } else {
-                  final String? presenceKey = presenceItemMap['key'] as String?;
-                  print('CONTEGGIO AVVISO: user_id non trovato o tipo errato nel payload. Payload: $userPayload. Presence Key: $presenceKey');
+            if (presencesListProperty != null && presencesListProperty is List) {
+              for (final dynamic presenceItem_dynamic in presencesListProperty) {
+                if (presenceItem_dynamic != null) {
+                  final dynamic payloadProperty = presenceItem_dynamic.payload;
+                  if (payloadProperty != null && payloadProperty is Map<String, dynamic>) {
+                    final Map<String, dynamic> payloadMap = payloadProperty;
+                    if (payloadMap.containsKey('user_id') && payloadMap['user_id'] is String) {
+                      final userIdFound = payloadMap['user_id'] as String;
+                      if (userIdFound.isNotEmpty) {
+                        idsExtractedFromState.add(userIdFound);
+                      }
+                    }
+                  } else {
+                    print('      RICONCILIAZIONE AVVISO: presenceItem_dynamic.payload non è una Map valida o è null. Payload: $payloadProperty');
+                  }
                 }
-              } else {
-                print('CONTEGGIO AVVISO: Elemento in metas non è Map<String, dynamic>. Tipo trovato: ${metaItem.runtimeType}');
               }
+            } else {
+              print('      RICONCILIAZIONE AVVISO: singleStateItem_dynamic.presences non è una Lista valida o è null. Valore di .presences: $presencesListProperty');
             }
-          } else {
-            final String? presenceKey = presenceItemMap['key'] as String?;
-            print('CONTEGGIO AVVISO: Chiave \'metas\' non trovata o non è una Lista nel presence item. Chiavi trovate: ${presenceItemMap.keys}. Presence Key: $presenceKey');
+          } catch (e, s) {
+            print('      RICONCILIAZIONE ERRORE INTERNO loop: Elaborazione singleStateItem fallita. Errore: $e\nItem: $singleStateItem_dynamic\nStack: $s');
           }
-        } else {
-          // Log if an item in the main list isn't a Map.
-          print('CONTEGGIO AVVISO: Elemento in presenceState list non è una Map. Tipo trovato: ${presenceItemRaw.runtimeType}');
         }
       }
 
-      if (!_isPresenceChannelReady && presencesList.isNotEmpty) {
-        print("CANALE: Canale CONFERMATO PRONTO dopo un _updateConnectedUsersCount con dati.");
-        _isPresenceChannelReady = true;
+      // Confronta e sincronizza _activeUserIds con idsExtractedFromState
+      if (!_areSetsEqual(idsExtractedFromState, _activeUserIds)) {
+        print('    RICONCILIAZIONE: Discrepanza! Sincronizzo _activeUserIds con stato da presenceState().');
+        print('      _activeUserIds (da JOIN/LEAVE) prima: $_activeUserIds');
+        print('      idsExtractedFromState (da presenceState()): $idsExtractedFromState');
+        _activeUserIds.clear();
+        _activeUserIds.addAll(idsExtractedFromState);
+        print('      _activeUserIds dopo sincronizzazione: $_activeUserIds');
+      } else {
+        print('    RICONCILIAZIONE: Nessuna discrepanza tra _activeUserIds e idsExtractedFromState. Stato coerente.');
       }
 
-      connectedUsers.value = uniqueUserIds.length;
-      print('CONTEGGIO: Utenti connessi aggiornati a: ${connectedUsers.value}');
+      // Aggiorna il conteggio finale basato su _activeUserIds (che ora dovrebbe essere sincronizzato)
+      _updateConnectedUsersCountFromSet();
     } catch (e, s) {
-      print('CONTEGGIO ERRORE grave durante l\'aggiornamento del conteggio: $e');
-      print('Stacktrace per errore conteggio: $s');
-      // Handle specific errors like cast errors if they occur.
+      print('  RICONCILIAZIONE ERRORE ESTERNO (List<SinglePresenceState>): $e \n$s');
     }
   }
-  // --- END OF CORRECTED METHOD ---
+
+  bool _areSetsEqual<T>(Set<T> set1, Set<T> set2) {
+    if (set1.length != set2.length) return false;
+    for (final item in set1) {
+      if (!set2.contains(item)) return false;
+    }
+    return true;
+  }
+
+  void _debugPrintFullPresenceState() {
+    if (_onlineUsersChannel == null || !_isPresenceChannelReady) {
+      print('  DEBUG_FULL_PRESENCE_STATE: Canale non pronto o nullo.');
+      return;
+    }
+    try {
+      final List<dynamic> stateListRaw = _onlineUsersChannel!.presenceState();
+      final List<dynamic> stateList = stateListRaw; // Ora sappiamo che è una lista
+
+      print('  DEBUG_FULL_PRESENCE_STATE: presenceState() -> Lista di ${stateList.length} elementi:');
+      for (int i = 0; i < stateList.length; i++) {
+        final singleState = stateList[i];
+        print('    [$i] Tipo Oggetto: $singleState.runtimeType');
+        print('        Valore (toString): ${singleState.toString()}');
+
+        // Tentativi di accesso dinamico (SOLO PER DEBUG)
+        dynamic dynState = singleState;
+        try {
+          print('        (dyn.key se esiste): ${dynState.key}');
+        } catch (_) {
+          print('        (dyn.key non accessibile)');
+        }
+        try {
+          final dynPresences = dynState.presences;
+          print('        (dyn.presences se esiste, tipo: ${dynPresences.runtimeType}): $dynPresences');
+          if (dynPresences is List && dynPresences.isNotEmpty) {
+            for (var k = 0; k < dynPresences.length; k++) {
+              final itemInPresences = dynPresences[k];
+              print('          (dyn.presences[$k], tipo: ${itemInPresences.runtimeType}): $itemInPresences');
+              if (itemInPresences != null) {
+                dynamic dynItemInPresences = itemInPresences;
+                try {
+                  print('            (dyn.presences[$k].payload): ${dynItemInPresences.payload}');
+                } catch (_) {
+                  print('            (dyn.presences[$k].payload non accessibile)');
+                }
+              }
+            }
+          } else if (dynPresences != null) {
+            // Se non è una lista ma esiste (improbabile per 'presences')
+            dynamic dynSinglePresence = dynPresences;
+            try {
+              print('          (dyn.presences.payload se dyn.presences è un oggetto con payload): ${dynSinglePresence.payload}');
+            } catch (_) {
+              print('          (dyn.presences.payload non accessibile)');
+            }
+          }
+        } catch (_) {
+          print('        (dyn.presences non accessibile o errore ulteriore)');
+        }
+      }
+      if (stateList.isEmpty) {
+        print('    La lista di presenceState è vuota.');
+      }
+    } catch (e, s) {
+      print('  DEBUG_FULL_PRESENCE_STATE: Errore durante la stampa: $e\n$s');
+    }
+  }
 
   Future<void> _unsubscribeFromOnlineUsers() async {
     print('PersonaleController: _unsubscribeFromOnlineUsers()');
     if (_onlineUsersChannel != null) {
+      print("  CANALE: Tentativo di unsubscribe da 'online-users'.");
       _isPresenceChannelReady = false;
       try {
         await _onlineUsersChannel!.unsubscribe();
+        print("  CANALE: Unsubscribe completato.");
       } catch (e, s) {
-        print("CANALE ERRORE durante unsubscribe da 'online-users': $e - $s");
+        print("  CANALE ERRORE unsubscribe: $e - $s");
       } finally {
-        supabase.removeChannel(_onlineUsersChannel!);
+        // supabase.removeChannel(_onlineUsersChannel!); // Rimuovere il canale qui è più pulito
         _onlineUsersChannel = null;
       }
-      connectedUsers.value = 0;
+      _activeUserIds.clear();
+      _updateConnectedUsersCountFromSet();
+    } else {
+      print("  CANALE: Nessun canale da cui fare unsubscribe.");
+      if (_activeUserIds.isNotEmpty || connectedUsers.value != 0) {
+        _activeUserIds.clear();
+        _updateConnectedUsersCountFromSet();
+      }
     }
   }
 
   Future<void> _loadUserData() async {
     print('PersonaleController: _loadUserData()');
-    message.value = '';
+    message.value = 'Caricamento dati utente...';
     final user = supabase.auth.currentUser;
-    personale.value = null;
 
     if (user == null) {
       message.value = 'Utente non autenticato.';
-      print('AUTH: Utente non autenticato.');
-      await _unsubscribeFromOnlineUsers();
+      print('  AUTH: Utente non autenticato.');
+      if (personale.value != null) personale.value = null;
       return;
     }
     final email = user.email!;
+    print('  AUTH: Caricamento dati per: $email (ID: ${user.id})');
 
     try {
       final List<dynamic> response = await supabase.from('personale').select().eq('email_principale', email).limit(1);
 
       if (response.isNotEmpty) {
-        print('response: $response');
         final Map<String, dynamic> userData = response.first as Map<String, dynamic>;
         personale.value = Personale.fromJson(userData);
-        print('AUTH: Personale model caricato: ${personale.value?.fullName}');
-        message.value = '';
+        print('  AUTH: Personale model caricato: ${personale.value?.fullName}');
+        message.value = 'Dati utente caricati.';
       } else {
-        print('AUTH: Nessun record Personale trovato per l\'email: $email');
-        personale.value = null;
+        print('  AUTH: Nessun record Personale per: $email');
+        if (personale.value != null) personale.value = null;
         message.value = 'Profilo personale non trovato.';
       }
     } catch (err, stackTrace) {
-      message.value = 'Errore imprevisto in _loadUserData: $err';
-      print('AUTH ERRORE imprevisto in _loadUserData: $err');
-      print('Stack trace: $stackTrace');
-      personale.value = null;
+      message.value = 'Errore caricamento dati utente.';
+      print('  AUTH ERRORE: $err\n$stackTrace');
+      if (personale.value != null) personale.value = null;
     }
-    print('AUTH: Fine _loadUserData, personale.value è ${personale.value == null ? "null" : "caricato"}.');
+    print('  AUTH: Fine _loadUserData. Personale: ${personale.value != null ? "caricato" : "null"}. Msg: "${message.value}"');
   }
 
   Future<void> _loadAppVersion() async {
     print('PersonaleController: _loadAppVersion()');
     try {
       final info = await PackageInfo.fromPlatform();
-      appVersion.value = info.version;
+      appVersion.value = info.version + (info.buildNumber.isNotEmpty && info.buildNumber != "0" ? "+${info.buildNumber}" : "");
     } catch (e) {
-      print("APP: Errore caricamento versione app: $e");
+      print("  APP: Errore versione app: $e");
       appVersion.value = "N/A";
     }
   }
 
   Future<void> reload() async {
     print('PersonaleController: reload()');
+    message.value = 'Ricaricamento...';
     await _loadUserData();
 
     if (supabase.auth.currentUser != null) {
       if (_onlineUsersChannel == null || !_isPresenceChannelReady) {
-        print("APP: Utente loggato, canale non pronto o nullo. Tentativo di sottoscrizione alla presence...");
+        print("  APP: Utente loggato, canale non pronto/nullo. (Ri)sottoscrivo.");
         _subscribeToOnlineUsers();
       } else {
-        print("APP: Utente loggato, canale presence già attivo e pronto.");
+        print("  APP: Utente loggato, canale già attivo. Stampo stato per debug e tento riconciliazione.");
+        _debugPrintFullPresenceState();
+        _reconcileActiveUserIdsFromListSinglePresenceState();
       }
     } else {
-      if (_onlineUsersChannel != null || _isPresenceChannelReady) {
-        print("APP: Utente non loggato, ma canale/flag indica attività. Tentativo di unsubscribe dalla presence...");
-        await _unsubscribeFromOnlineUsers();
-      } else {
-        print("APP: Utente non loggato, canale presence già inattivo.");
-      }
+      print("  APP: Utente non loggato. Assicuro disiscrizione.");
+      await _unsubscribeFromOnlineUsers();
     }
+    message.value = 'Ricaricamento completato.';
   }
 }

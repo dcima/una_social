@@ -2,18 +2,17 @@
 // ignore_for_file: avoid_print, deprecated_member_use
 
 import 'package:flutter/material.dart';
-// Rimuovi: import 'package:get/get.dart'; // Non più necessario per GetMaterialApp
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
-//import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:una_social_app/app_router.dart'; // Importa il tuo router GoRouter
+import 'package:una_social_app/app_router.dart';
+import 'package:una_social_app/helpers/auth_helper.dart'; // Importa l'helper
 
-// --- ValueNotifier Globale ---
-// Usato da GoRouter per i redirect
-final ValueNotifier<bool> initialAuthCompleted = ValueNotifier(false);
+// --- ValueNotifier Globale per lo stato di autenticazione dell'app ---
+final ValueNotifier<AuthStatus> appAuthStatusNotifier = ValueNotifier(AuthStatus.loading);
+
+enum AuthStatus { loading, authenticated, unauthenticated }
 // --- FINE ValueNotifier ---
 
-// Definisci le costanti per le chiavi, per evitare typo e per coerenza con --dart-define
 const String supabaseUrlEnvKey = 'SUPABASE_URL';
 const String supabaseAnonKeyEnvKey = 'SUPABASE_ANON_KEY';
 
@@ -22,24 +21,6 @@ Future<void> main() async {
   setUrlStrategy(PathUrlStrategy());
   print("URL Strategy impostata su Path.");
 
-/*****
-  try {
-    await dotenv.load(fileName: ".env");
-    print(".env caricato.");
-  } catch (e) {
-    print("ATTENZIONE: Errore durante caricamento .env: $e.");
-  }
-
-  final String supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
-  final String supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
-
-  if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
-    print("ERRORE CRITICO: SUPABASE_URL o SUPABASE_ANON_KEY non trovate o vuote!");
-    runApp(const SupabaseErrorApp(error: "Variabili d'ambiente Supabase mancanti o vuote in .env."));
-    return;
-  }
-******/
-// Leggi le variabili d'ambiente definite al momento della compilazione/lancio con --dart-define
   const String supabaseUrl = String.fromEnvironment(supabaseUrlEnvKey, defaultValue: '');
   const String supabaseAnonKey = String.fromEnvironment(supabaseAnonKeyEnvKey, defaultValue: '');
 
@@ -51,17 +32,14 @@ Future<void> main() async {
     if (supabaseAnonKey.isEmpty) {
       errorMessage += "$supabaseAnonKeyEnvKey non trovata o vuota. ";
     }
-    errorMessage += "Assicurati che siano definite con --dart-define nel comando di build/run (es. nel launch.json di VS Code).";
-
+    errorMessage += "Assicurati che siano definite con --dart-define.";
     print(errorMessage);
     runApp(SupabaseErrorApp(error: errorMessage));
     return;
   }
 
   print("Supabase URL (da --dart-define): $supabaseUrl");
-  // print("Supabase Anon Key (da --dart-define): $supabaseAnonKey"); // Non stampare la chiave in produzione per sicurezza!
 
-  // --- Inizializzazione Supabase ---
   try {
     print("Inizializzazione Supabase...");
     await Supabase.initialize(
@@ -74,71 +52,80 @@ Future<void> main() async {
     );
     print("Supabase inizializzato.");
 
-    // --- Listener per cambiamenti stato autenticazione ---
-    print("Impostazione listener onAuthStateChange POST-init...");
+    print("Impostazione listener onAuthStateChange...");
     Supabase.instance.client.auth.onAuthStateChange.listen(
       (data) {
         final AuthChangeEvent event = data.event;
         final Session? session = data.session;
-        print('[MAIN AUTH LISTENER POST-INIT] Evento Ricevuto: $event, Sessione: ${session != null ? "Presente (${session.user.id})" : "Assente"}');
+        print('[MAIN AUTH LISTENER] Evento Ricevuto: $event, Sessione: ${session != null ? "Presente (User ID: ${session.user.id})" : "Assente"}');
 
-        // Aggiorna il ValueNotifier per riflettere lo stato di login/logout.
+        // Se l'evento NON è signedOut, e la ragione era invalidRefreshToken,
+        // la "crisi" è passata (es. l'utente si è riloggato), quindi resettiamo.
+        // Questo evita che un vecchio messaggio di "sessione scaduta" appaia dopo un login successivo.
+        if (event != AuthChangeEvent.signedOut && AuthHelper.lastLogoutReason == LogoutReason.invalidRefreshToken) {
+          AuthHelper.clearLastLogoutReason();
+        }
+
         switch (event) {
+          case AuthChangeEvent.initialSession:
+            if (session != null && !session.isExpired) {
+              print('[MAIN AUTH LISTENER] initialSession: Utente valido. Notifier -> authenticated.');
+              appAuthStatusNotifier.value = AuthStatus.authenticated;
+            } else {
+              print('[MAIN AUTH LISTENER] initialSession: Nessun utente valido. Notifier -> unauthenticated.');
+              // Se la sessione iniziale non è valida e la ragione era già invalidRefreshToken (da un errore precedente),
+              // non la sovrascriviamo con 'none', lasciamo che la LoginScreen la gestisca.
+              if (AuthHelper.lastLogoutReason != LogoutReason.invalidRefreshToken) {
+                AuthHelper.clearLastLogoutReason(); // Pulisce ragioni precedenti se non è un invalid refresh
+              }
+              appAuthStatusNotifier.value = AuthStatus.unauthenticated;
+            }
+            break;
           case AuthChangeEvent.signedIn:
           case AuthChangeEvent.tokenRefreshed:
           case AuthChangeEvent.mfaChallengeVerified:
           case AuthChangeEvent.userUpdated:
-            if (!initialAuthCompleted.value) {
-              print('[MAIN AUTH LISTENER POST-INIT] Rilevato stato Loggato ($event), imposto initialAuthCompleted a true.');
-              initialAuthCompleted.value = true;
+            if (appAuthStatusNotifier.value != AuthStatus.authenticated) {
+              print('[MAIN AUTH LISTENER] Evento $event: Stato Loggato. Notifier -> authenticated.');
+              appAuthStatusNotifier.value = AuthStatus.authenticated;
             }
-            break; // Non dimenticare i break!
-
+            // Se l'utente si logga con successo, qualsiasi ragione di logout precedente è irrilevante
+            AuthHelper.clearLastLogoutReason();
+            break;
           case AuthChangeEvent.signedOut:
           case AuthChangeEvent.userDeleted:
-            if (initialAuthCompleted.value) {
-              print('[MAIN AUTH LISTENER POST-INIT] Rilevato stato Sloggato ($event), imposto initialAuthCompleted a false.');
-              initialAuthCompleted.value = false;
+            if (appAuthStatusNotifier.value != AuthStatus.unauthenticated) {
+              print('[MAIN AUTH LISTENER] Evento $event: Stato Sloggato. Notifier -> unauthenticated.');
+              appAuthStatusNotifier.value = AuthStatus.unauthenticated;
             }
-            break; // Non dimenticare i break!
-
-          // --- CASO MANCANTE AGGIUNTO ---
-          case AuthChangeEvent.initialSession:
-            // Questo evento segnala lo stato iniziale letto.
-            // Lo stato è già stato impostato dal controllo immediato dopo l'init,
-            // quindi qui non facciamo nulla che modifichi initialAuthCompleted.value.
-            print('[MAIN AUTH LISTENER POST-INIT] Gestito evento initialSession (nessuna modifica allo stato necessaria qui).');
-            break; // Aggiunto break
-
+            // NON pulire la ragione qui, potrebbe essere stata impostata dall'onError.
+            // Se AuthHelper.lastLogoutReason è ancora LogoutReason.none,
+            // significa che il logout è stato probabilmente avviato altrove (es. user-initiated o scadenza token non gestita da onError qui).
+            // Se l'utente si è disconnesso esplicitamente, la HomeScreen dovrebbe aver impostato UserInitiated.
+            break;
           case AuthChangeEvent.passwordRecovery:
-            // Non cambia lo stato di login/logout.
-            print('[MAIN AUTH LISTENER POST-INIT] Gestito evento passwordRecovery.');
+            print('[MAIN AUTH LISTENER] Gestito evento passwordRecovery. Stato auth non modificato.');
             break;
         }
       },
       onError: (error) {
-        // Gestisce eventuali errori nello stream di eventi auth.
-        print('[MAIN AUTH LISTENER POST-INIT] Errore nello stream onAuthStateChange: $error');
-        if (initialAuthCompleted.value) {
-          initialAuthCompleted.value = false; // Resetta a false in caso di errore grave
+        print('[MAIN AUTH LISTENER] Errore nello stream onAuthStateChange: $error');
+        if (error is AuthException && (error.statusCode == '400' || error.message.toLowerCase().contains('invalid refresh token'))) {
+          print('[MAIN AUTH LISTENER] Causa logout specifica: Invalid Refresh Token.');
+          AuthHelper.setLogoutReason(LogoutReason.invalidRefreshToken);
+        }
+        // Altrimenti, non impostiamo una ragione specifica qui, ma trattiamo l'errore come un potenziale logout
+        if (appAuthStatusNotifier.value != AuthStatus.unauthenticated) {
+          print('[MAIN AUTH LISTENER] Errore stream: Notifier -> unauthenticated.');
+          appAuthStatusNotifier.value = AuthStatus.unauthenticated;
         }
       },
     );
-    print("Listener onAuthStateChange POST-init impostato.");
-
-    // --- Controllo Sessione Iniziale ---
-    print("Controllo sessione iniziale...");
-    final initialSession = Supabase.instance.client.auth.currentSession;
-    if (initialSession != null && !initialSession.isExpired) {
-      print("[MAIN CHECK] Sessione iniziale valida.");
-      initialAuthCompleted.value = true;
-    } else {
-      print("[MAIN CHECK] Nessuna sessione iniziale valida.");
-    }
+    print("Listener onAuthStateChange impostato.");
   } catch (e, stackTrace) {
     print("ERRORE CRITICO init Supabase: $e");
     print("Stack trace: $stackTrace");
-    initialAuthCompleted.value = false;
+    appAuthStatusNotifier.value = AuthStatus.unauthenticated;
     runApp(SupabaseErrorApp(error: "Errore inizializzazione Supabase: ${e.toString()}"));
     return;
   }
@@ -147,15 +134,12 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-// --- Widget Radice dell'Applicazione ---
+// ... resto di main.dart invariato (MyApp, SupabaseErrorApp) ...
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // --- TORNA A MaterialApp.router ---
-    // Gestisce il routing tramite GoRouter.
-    // GetX verrà usato solo per State Management.
     return MaterialApp.router(
       title: 'Una Social',
       theme: ThemeData(
@@ -175,17 +159,11 @@ class MyApp extends StatelessWidget {
       ),
       themeMode: ThemeMode.system,
       debugShowCheckedModeBanner: false,
-
-      // --- Configurazione GoRouter ---
-      // Passa direttamente il routerConfig di GoRouter.
       routerConfig: AppRouter.router,
-      // --- Fine Configurazione GoRouter ---
     );
   }
 }
 
-// --- Widget per Mostrare Errori Critici ---
-// (Invariato, usa MaterialApp standard)
 class SupabaseErrorApp extends StatelessWidget {
   final String error;
   const SupabaseErrorApp({super.key, required this.error});
@@ -193,7 +171,6 @@ class SupabaseErrorApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      // Usa MaterialApp standard qui
       theme: ThemeData.light(useMaterial3: true),
       darkTheme: ThemeData.dark(useMaterial3: true),
       themeMode: ThemeMode.system,
@@ -220,7 +197,7 @@ class SupabaseErrorApp extends StatelessWidget {
                 ),
                 const SizedBox(height: 25),
                 const Text(
-                  'Verifica la connessione, il file .env e riavvia l\'applicazione.',
+                  'Verifica la connessione, le variabili d\'ambiente Supabase definite con --dart-define e riavvia l\'applicazione.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.grey),
                 ),

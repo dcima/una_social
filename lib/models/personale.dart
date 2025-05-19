@@ -32,18 +32,17 @@ class Personale {
     required this.emailPrincipale,
     this.photoUrl,
     this.cv,
-    this.altreEmails, // Si aspetta List<Map{'t': String, 'v': String}>?
+    this.altreEmails,
     this.noteBiografiche,
     this.rss,
     this.ruoli,
-    this.telefoni, // Si aspetta List<Map{'t': String, 'v': String}>?
+    this.telefoni,
     this.web,
   });
 
   String get fullName => '$nome $cognome';
 
   factory Personale.fromJson(Map<String, dynamic> json) {
-    // Helper per lista di stringhe (ruoli) - invariato
     List<String>? safeStringList(dynamic value) {
       if (value == null) return null;
       List<String> result = [];
@@ -56,18 +55,17 @@ class Personale {
           if (decoded is List) {
             result = decoded.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
           } else {
-            print("Attenzione: La stringa JSON decodificata per safeStringList non è una lista: $value");
+            print("Attenzione (Personale.fromJson): La stringa JSON decodificata per safeStringList non è una lista: $value");
           }
         } catch (e) {
-          print("Attenzione: Impossibile decodificare la stringa JSON per safeStringList: '$value' - $e");
+          print("Attenzione (Personale.fromJson): Impossibile decodificare la stringa JSON per safeStringList: '$value' - $e");
         }
       } else {
-        print("Attenzione: Tipo non supportato per safeStringList: ${value.runtimeType}, Valore: $value");
+        print("Attenzione (Personale.fromJson): Tipo non supportato per safeStringList: ${value.runtimeType}, Valore: $value");
       }
       return result.isEmpty ? null : result;
     }
 
-    // Helper per lista di map (telefoni, altreEmails) - SEMPLIFICATO
     List<Map<String, String>>? safeMapList(dynamic value) {
       if (value == null) return null;
 
@@ -81,43 +79,43 @@ class Personale {
           if (decoded is List) {
             listToProcess = decoded;
           } else {
-            print("Attenzione: La stringa JSON decodificata per safeMapList non è una lista: $value");
-            return [];
+            print("Attenzione (Personale.fromJson): La stringa JSON decodificata per safeMapList non è una lista: $value");
+            return []; // Return empty list on decode error
           }
         } catch (e) {
-          print("Attenzione: Impossibile decodificare la stringa JSON per safeMapList: '$value' - $e");
-          return [];
+          print("Attenzione (Personale.fromJson): Impossibile decodificare la stringa JSON per safeMapList: '$value' - $e");
+          return []; // Return empty list on parse error
         }
       } else {
-        print("Attenzione: Tipo non supportato per safeMapList: ${value.runtimeType}, Valore: $value");
-        return [];
+        print("Attenzione (Personale.fromJson): Tipo non supportato per safeMapList: ${value.runtimeType}, Valore: $value");
+        return []; // Return empty list for unsupported types
       }
 
       List<Map<String, String>> result = [];
       for (final item in listToProcess) {
         if (item is Map) {
-          // Assicurati che le chiavi siano stringhe e i valori siano stringhe
-          // Questo mantiene 't' e 'v' come sono dal DB.
           final Map<String, String> entry = {};
+          // USARE LE CHIAVI 't' e 'v' COME SONO NEL JSON/DB
           if (item.containsKey('t') && item['t'] != null) {
             entry['t'] = item['t'].toString();
           } else {
             entry['t'] = ''; // Default a stringa vuota se 't' manca o è null
           }
+
           if (item.containsKey('v') && item['v'] != null) {
             entry['v'] = item['v'].toString();
           } else {
-            // Non aggiungiamo l'entry se 'v' è mancante o null,
-            // oppure impostiamo a stringa vuota se la logica lo richiede
-            // print("Attenzione: Valore 'v' mancante o null per l'item: $item");
-            continue; // Salta questa entry se 'v' è cruciale e mancante/null
+            // Se 'v' è cruciale e manca/null, considera di saltare l'entry o loggare
+            // print("Attenzione (Personale.fromJson): Valore 'v' mancante o null per l'item: $item");
+            // entry['v'] = ''; // Oppure imposta a vuoto se consentito
+            continue; // Salta questa entry se 'v' è mancante e obbligatorio
           }
-          // Aggiungiamo solo se 'v' non è vuoto, per coerenza con la logica di salvataggio
+          // Aggiungi solo se 'v' (valore) non è vuoto, se questa è la logica desiderata
           if (entry['v']!.isNotEmpty) {
             result.add(entry);
           }
         } else {
-          print("Attenzione: Elemento ignorato in safeMapList (non è una Map): ${item?.runtimeType}, Valore: $item");
+          print("Attenzione (Personale.fromJson): Elemento ignorato in safeMapList (non è una Map): ${item?.runtimeType}, Valore: $item");
         }
       }
       return result.isEmpty ? null : result;
@@ -133,26 +131,25 @@ class Personale {
       emailPrincipale: json['email_principale'] as String? ?? '',
       photoUrl: json['photo_url'] as String?,
       cv: json['cv'] as String?,
-      altreEmails: safeMapList(json['altre_emails']), // Ora si aspetta List<Map{'t':..., 'v':...}>
+      altreEmails: safeMapList(json['altre_emails']), // Conterrà Map{'t':..., 'v':...}
       noteBiografiche: json['note_biografiche'] as String?,
       rss: json['rss'] as String?,
       ruoli: safeStringList(json['ruoli']),
-      telefoni: safeMapList(json['telefoni']), // Ora si aspetta List<Map{'t':..., 'v':...}>
+      telefoni: safeMapList(json['telefoni']), // Conterrà Map{'t':..., 'v':...}
       web: json['web'] as String?,
     );
   }
 
   Map<String, dynamic> toJson() {
     // Helper per assicurare che la lista di map sia nel formato corretto per il DB
-    // (in questo caso, nessun cambio di chiavi, solo verifica)
+    // (le chiavi devono essere 't' e 'v')
     List<Map<String, String>>? ensureDbMapListFormat(List<Map<String, String>>? list) {
       if (list == null || list.isEmpty) return null;
       return list
-          // Filtra via le entry dove 'v' è vuoto, se questa è la logica desiderata
-          .where((item) => item['v'] != null && item['v']!.isNotEmpty)
+          .where((item) => item['v'] != null && item['v']!.isNotEmpty) // Filtra se 'v' è vuoto
           .map((item) => {
-                't': item['t'] ?? '', // Assicura che 't' esista, anche se vuoto
-                'v': item['v']!, // 'v' è già stato controllato per non essere null/vuoto
+                't': item['t'] ?? '', // Assicura che 't' esista
+                'v': item['v']!, // 'v' è già stato controllato
               })
           .toList();
     }
@@ -167,19 +164,19 @@ class Personale {
       'email_principale': emailPrincipale,
       'photo_url': photoUrl,
       'cv': cv,
-      'altre_emails': ensureDbMapListFormat(altreEmails), // Nessuna mappatura di chiavi
+      'altre_emails': ensureDbMapListFormat(altreEmails), // Usa 't' e 'v'
       'note_biografiche': noteBiografiche,
       'rss': rss,
       'ruoli': ruoli?.isEmpty ?? true ? null : ruoli,
-      'telefoni': ensureDbMapListFormat(telefoni), // Nessuna mappatura di chiavi
+      'telefoni': ensureDbMapListFormat(telefoni), // Usa 't' e 'v'
       'web': web,
     };
-    data.removeWhere((key, value) => value == null);
+    data.removeWhere((key, value) => value == null); // Rimuove chiavi con valori null
     return data;
   }
 
   @override
   String toString() {
-    return 'Personale(uuid: $uuid, id: $id, nome: $nome, cognome: $cognome, ente: $ente, struttura: $struttura, emailPrincipale: $emailPrincipale, ruoli: $ruoli, telefoni: $telefoni, altreEmails: $altreEmails, ...)';
+    return 'Personale(uuid: $uuid, id: $id, nome: $nome, cognome: $cognome, ente: $ente, email: $emailPrincipale, altreEmails: $altreEmails, telefoni: $telefoni)';
   }
 }

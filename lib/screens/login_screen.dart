@@ -5,8 +5,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Per FilteringTextInputFormatter
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:una_social_app/helpers/auth_helper.dart'; // Importa l'helper
+import 'package:una_social_app/helpers/snackbar_helper.dart'; // Per la Snackbar
 
-final supabase = Supabase.instance.client; // Inizializza il client Supabase
+final supabase = Supabase.instance.client;
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -28,9 +30,18 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     _authStateSubscription = supabase.auth.onAuthStateChange.listen((data) {
-      final session = data.session;
-      if (session != null && mounted) {
-        // GoRouter gestirà il redirect globale
+      // La logica di redirect è gestita da GoRouter globalmente
+    });
+
+    // Mostra un messaggio se il logout è avvenuto per sessione invalida
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && AuthHelper.lastLogoutReason == LogoutReason.invalidRefreshToken) {
+        SnackbarHelper.showErrorSnackbar(
+          context,
+          'La tua sessione è scaduta o non è più valida. Effettua nuovamente il login.',
+          duration: const Duration(seconds: 5), // Durata più lunga per dare tempo di leggere
+        );
+        AuthHelper.clearLastLogoutReason(); // Pulisci la ragione dopo aver mostrato il messaggio
       }
     });
   }
@@ -39,22 +50,16 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _otpController.dispose(); // --- NUOVO: Dispose OTP controller ---
+    _otpController.dispose();
     _authStateSubscription?.cancel();
     super.dispose();
   }
 
-  // Funzione per Sign In standard con Email/Password
   Future<void> _signIn() async {
     if (!_formKey.currentState!.validate()) {
-      final emailValid = _emailController.text.isNotEmpty && _emailController.text.contains('@');
-      final passwordValid = _passwordController.text.isNotEmpty && _passwordController.text.length >= 6;
-      if (!emailValid || !passwordValid) {
-        if (!_formKey.currentState!.validate()) {
-          print("Form validation failed for Email/Password sign in.");
-          return;
-        }
-      }
+      // La validazione del form mostrerà i messaggi di errore nei TextFormField
+      print("Form validation failed for Email/Password sign in.");
+      return;
     }
     if (mounted) {
       setState(() => _isLoading = true);
@@ -64,13 +69,16 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
+      // Se il login ha successo, GoRouter gestirà il redirect.
+      // Pulisci qualsiasi ragione di logout precedente, dato che l'utente sta tentando un nuovo login.
+      AuthHelper.clearLastLogoutReason();
     } on AuthException catch (e) {
       if (mounted) {
-        _showErrorSnackBar('Errore Login: ${e.message}');
+        SnackbarHelper.showErrorSnackbar(context, 'Errore Login: ${e.message}');
       }
     } catch (e) {
       if (mounted) {
-        _showErrorSnackBar('Errore inatteso: $e');
+        SnackbarHelper.showErrorSnackbar(context, 'Errore inatteso: $e');
       }
     } finally {
       if (mounted) {
@@ -84,11 +92,11 @@ class _LoginScreenState extends State<LoginScreen> {
     final otp = _otpController.text.trim();
 
     if (email.isEmpty || !email.contains('@')) {
-      _showErrorSnackBar('Inserisci un\'email valida per verificare il codice.');
+      SnackbarHelper.showErrorSnackbar(context, 'Inserisci un\'email valida per verificare il codice.');
       return;
     }
     if (otp.isEmpty || otp.length != 6 || !RegExp(r'^[0-9]+$').hasMatch(otp)) {
-      _showErrorSnackBar('Inserisci un codice di invito valido (6 cifre).');
+      SnackbarHelper.showErrorSnackbar(context, 'Inserisci un codice di invito valido (6 cifre).');
       return;
     }
 
@@ -96,26 +104,23 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _isLoading = true);
     }
     try {
-      // Usa verifyOTP con il tipo corretto
       await supabase.auth.verifyOTP(
         email: email,
         token: otp,
-        type: OtpType.invite, // Specifica che è un OTP di invito!
+        type: OtpType.invite,
       );
-      // Se arriva qui, la verifica ha avuto successo e l'utente è loggato.
-      // GoRouter dovrebbe gestire il redirect a /home grazie a onAuthStateChange.
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invito verificato con successo!'), backgroundColor: Colors.green),
-        );
+        SnackbarHelper.showSuccessSnackbar(context, 'Invito verificato con successo! Verrai reindirizzato.');
       }
+      // Se la verifica ha successo, GoRouter gestirà il redirect.
+      AuthHelper.clearLastLogoutReason();
     } on AuthException catch (e) {
       if (mounted) {
-        _showErrorSnackBar('Errore Verifica Codice: ${e.message}');
+        SnackbarHelper.showErrorSnackbar(context, 'Errore Verifica Codice: ${e.message}');
       }
     } catch (e) {
       if (mounted) {
-        _showErrorSnackBar('Errore inatteso durante la verifica: $e');
+        SnackbarHelper.showErrorSnackbar(context, 'Errore inatteso durante la verifica: $e');
       }
     } finally {
       if (mounted) {
@@ -124,21 +129,8 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // Funzione helper per mostrare errori
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).removeCurrentSnackBar(); // Rimuovi snackbar precedenti
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Theme.of(context).colorScheme.error,
-      ),
-    );
-  }
-
-  // _signInWithGoogle() rimane invariato...
-  Future<void> _signInWithGoogle() async {
-    // ... (stesso codice di prima) ...
-  }
+  // _signInWithGoogle non è nel tuo codice, la rimuovo per brevità se non necessaria
+  // Future<void> _signInWithGoogle() async { ... }
 
   @override
   Widget build(BuildContext context) {
@@ -156,19 +148,16 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Accedi o Registrati',
+                    'Accedi',
                     style: Theme.of(context).textTheme.headlineMedium,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 30),
-
-                  // --- Sezione Email/Password ---
                   TextFormField(
                     controller: _emailController,
-                    decoration: const InputDecoration(labelText: 'Email *'), // Aggiungi * per indicare che serve sempre
+                    decoration: const InputDecoration(labelText: 'Email *'),
                     keyboardType: TextInputType.emailAddress,
                     validator: (value) {
-                      // Validazione base email (richiesta per entrambi i flussi)
                       if (value == null || value.isEmpty || !value.contains('@')) {
                         return 'Inserisci un\'email valida';
                       }
@@ -180,7 +169,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _passwordController,
                     obscureText: _isPasswordObscured,
                     decoration: InputDecoration(
-                      labelText: 'Password', // Non necessaria per flusso OTP
+                      labelText: 'Password',
                       suffixIcon: IconButton(
                         icon: Icon(_isPasswordObscured ? Icons.visibility : Icons.visibility_off, color: Theme.of(context).primaryColorDark.withOpacity(0.6)),
                         tooltip: _isPasswordObscured ? 'Mostra password' : 'Nascondi password',
@@ -188,10 +177,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     validator: (value) {
-                      // La validazione della password è richiesta SOLO se
-                      // l'utente NON sta inserendo un codice OTP.
-                      // Potremmo rendere la validazione condizionale, ma è più complesso.
-                      // Se l'utente usa il flusso OTP, ignoreremo questo errore.
                       if (_otpController.text.isEmpty && (value == null || value.isEmpty || value.length < 6)) {
                         return 'La password deve avere almeno 6 caratteri (se non usi il codice invito)';
                       }
@@ -200,12 +185,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
                   ElevatedButton(
-                    onPressed: _isLoading ? null : _signIn, // Chiama _signIn
-                    child: _isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Accedi / Registrati'),
+                    onPressed: _isLoading ? null : _signIn,
+                    child: _isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Accedi'),
                   ),
                   const SizedBox(height: 25),
-
-                  // --- Separatore e Sezione Codice Invito ---
                   const Row(
                     children: <Widget>[
                       Expanded(child: Divider()),
@@ -227,36 +210,23 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _otpController,
                     decoration: const InputDecoration(
                       labelText: 'Codice Invito (6 cifre)',
-                      counterText: "", // Nasconde il contatore standard
+                      counterText: "",
                     ),
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly], // Permette solo numeri
-                    maxLength: 6, // Limita a 6 caratteri
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    maxLength: 6,
                     textAlign: TextAlign.center,
-                    validator: (value) {
-                      // Validazione opzionale: richiesta solo se si usa questo flusso
-                      // if (_passwordController.text.isEmpty && (value == null || value.isEmpty || value.length != 6)) {
-                      //   return 'Il codice deve avere 6 cifre (se non usi la password)';
-                      // }
-                      // Per ora non validiamo qui, la validazione avviene in _verifyOtpInvite
-                      return null;
-                    },
+                    // Validator non strettamente necessario qui se _verifyOtpInvite fa i controlli
                   ),
                   const SizedBox(height: 15),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.teal, // Colore diverso per distinguerlo?
+                      backgroundColor: Colors.teal,
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: _isLoading ? null : _verifyOtpInvite, // Chiama _verifyOtpInvite
+                    onPressed: _isLoading ? null : _verifyOtpInvite,
                     child: _isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Verifica Codice Invito'),
                   ),
-
-                  // Google Sign in e Nota finale (invariati)
-                  const SizedBox(height: 25),
-                  /*
-                   ElevatedButton.icon( ... Google Button ...),
-                   */
                   const SizedBox(height: 20),
                   const Text(
                     'Nota: Cliccando il link di invito nell\'email, verrai autenticato automaticamente.',

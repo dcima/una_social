@@ -7,6 +7,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social_app/controllers/personale_controller.dart';
+import 'package:una_social_app/helpers/auth_helper.dart';
+import 'package:una_social_app/helpers/snackbar_helper.dart';
 import 'package:una_social_app/models/personale.dart';
 import 'package:una_social_app/painters/star_painter.dart';
 import 'package:una_social_app/screens/personale_profile.dart';
@@ -164,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const int expiresIn = 3600; // Signed URL validity duration (seconds)
 
     try {
-      print("Tentativo di generare Signed URL per: $imagePath");
+      //print("Tentativo di generare Signed URL per: $imagePath");
       final supabase = Supabase.instance.client;
 
       // Optional: Check if the file actually exists before generating the URL
@@ -179,7 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // Generate the signed URL
       final signedUrl = await supabase.storage.from(bucketName).createSignedUrl(imagePath, expiresIn);
 
-      print("Signed URL generato: $signedUrl");
+      //print("Signed URL generato: $signedUrl");
       return signedUrl;
     } on StorageException catch (e) {
       // Catch specific Supabase storage errors
@@ -207,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen> {
           : _buildDefaultAvatar(context, "URL fallback non valido"); // If fallback was also bad, show default
     }
 
-    print("Visualizzazione immagine da URL ${isSignedUrlAttempt ? 'firmato' : 'fallback'}: $url");
+    //print("Visualizzazione immagine da URL ${isSignedUrlAttempt ? 'firmato' : 'fallback'}: $url");
 
     return CircleAvatar(
       radius: 18, // Matches desired size
@@ -219,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
           key: ValueKey(url), // Important for updating image if URL changes
           width: 36, // Double the radius
           height: 36,
-          fit: BoxFit.cover, // Covers the circle area, cropping if necessary
+          fit: BoxFit.fill,
           // Shows loading progress
           loadingBuilder: (context, child, loadingProgress) {
             if (loadingProgress == null) return child; // Image loaded, show it
@@ -544,14 +546,51 @@ class _HomeScreenState extends State<HomeScreen> {
                                 break;
                               case ProfileAction.logout:
                                 try {
+                                  AuthHelper.setLogoutReason(LogoutReason.userInitiated);
+                                  print("[HomeScreen] Logout: Inizio signOut...");
                                   await Supabase.instance.client.auth.signOut();
-                                  // Use GoRouter to navigate back to login after logout
+                                  print("[HomeScreen] Logout: signOut completato.");
+
+                                  // Se il widget è ancora montato dopo il signOut, procedi con la navigazione.
+                                  // Il cambiamento di stato dell'autenticazione dovrebbe già aver triggerato GoRouter,
+                                  // quindi questa navigazione manuale potrebbe essere ridondante o addirittura problematica
+                                  // se GoRouter sta già facendo il suo lavoro.
+
+                                  // IMPORTANTE: GoRouter ascolta onAuthStateChange. Quando signOut() viene completato,
+                                  // onAuthStateChange emette un evento, e il redirect globale di GoRouter
+                                  // dovrebbe già portare a /login.
+                                  // La chiamata esplicita a GoRouter.of(context).go('/login') qui
+                                  // potrebbe essere la fonte del problema se il contesto non è più valido
+                                  // o se entra in conflitto con il redirect automatico di GoRouter.
+
+                                  // Rimuoviamo la navigazione esplicita qui e ci affidiamo al redirect di GoRouter.
+                                  // if (!mounted) {
+                                  //   print("[HomeScreen] Logout: Widget smontato prima della navigazione esplicita.");
+                                  //   return;
+                                  // }
+                                  // print("[HomeScreen] Logout: Tento navigazione esplicita a /login.");
+                                  // GoRouter.of(context).go('/login'); // PROVA A RIMUOVERE QUESTA RIGA
+
+                                  // Se la rimozione della navigazione esplicita non risolve,
+                                  // e l'errore persiste, potrebbe essere legato allo smontaggio del PopupMenuButton
+                                  // stesso, indipendentemente dalla navigazione esplicita.
+                                } on AuthException catch (ae, s) {
+                                  // Cattura specificamente AuthException
+                                  AuthHelper.clearLastLogoutReason(); // Pulisci solo se il signOut fallisce
+                                  print("[HomeScreen] Logout: AuthException: $ae\nStack: $s");
                                   if (!mounted) return;
-                                  GoRouter.of(context).go('/login');
-                                } catch (e) {
-                                  print("Errore durante logout: $e");
+                                  SnackbarHelper.showErrorSnackbar(context, "Errore logout: ${ae.message}");
+                                } catch (e, s) {
+                                  // Cattura altre eccezioni
+                                  // Non pulire AuthHelper qui, l'errore potrebbe essere quello "unsafe"
+                                  print("[HomeScreen] Logout: Errore generico: $e\nStack: $s");
                                   if (!mounted) return;
-                                  _showSnackbar(context, "Errore logout: ${e is AuthException ? e.message : e.toString()}", isError: true);
+                                  // Non mostrare una snackbar per l'errore "unsafe", è un problema di framework/stato.
+                                  if (e.toString().contains("Looking up a deactivated widget's ancestor is unsafe")) {
+                                    // Non fare nulla, l'errore è già stato loggato dalla libreria widgets
+                                  } else {
+                                    SnackbarHelper.showErrorSnackbar(context, "Errore logout inatteso.");
+                                  }
                                 }
                                 break;
                               case ProfileAction.version:
