@@ -7,9 +7,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social_app/controllers/personale_controller.dart';
-import 'package:una_social_app/models/personale.dart'; // Make sure Personale has universita and id fields
-import 'package:una_social_app/screens/personale/personale_profile.dart'; // Import the profile editing screen/dialog
-import 'package:una_social_app/painters/star_painter.dart'; // Adjust path as needed
+import 'package:una_social_app/models/personale.dart';
+import 'package:una_social_app/painters/star_painter.dart';
+import 'package:una_social_app/screens/personale_profile.dart';
 
 // Enum for profile menu actions
 enum ProfileAction { edit, logout, version }
@@ -105,17 +105,26 @@ class _HomeScreenState extends State<HomeScreen> {
             child: PersonaleProfile(initialPersonale: currentUser),
           ),
           // Actions might be needed if PersonaleProfile doesn't have its own save/cancel
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Annulla'),
-              onPressed: () => Navigator.of(dialogContext).pop(),
-            ),
-            // Add a Save button here if PersonaleProfile doesn't handle saving itself
-            // TextButton(
-            //   child: const Text('Salva'),
-            //   onPressed: () { /* TODO: Trigger save logic in PersonaleProfile */ Navigator.of(dialogContext).pop(); },
-            // ),
-          ],
+          /**
+            actions: <Widget>[
+              TextButton(
+                child: const Text('Annulla'),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+              ),
+              // Add a Save button here if PersonaleProfile doesn't handle saving itself
+              TextButton(
+                child: const Text('Salva'),
+                onPressed: () {
+                  print("Salvataggio profilo...");
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Salvo ....'), backgroundColor: Colors.green),
+                  );
+                  Navigator.of(dialogContext).pop();
+                },
+              ),
+            ],
+
+  **/
         );
       },
     );
@@ -140,17 +149,17 @@ class _HomeScreenState extends State<HomeScreen> {
   // --- Helper function to generate the Supabase signed URL ---
   Future<String?> _getSignedAvatarUrl(Personale personale) async {
     // Adjust field names to match your Personale model exactly
-    final universita = personale.universita;
+    final ente = personale.ente;
     final id = personale.id;
 
     // Validate necessary data for path construction
-    if (universita.isEmpty || id <= 0) {
-      print("Dati insufficienti per generare il percorso Supabase (universita o id mancanti).");
+    if (ente.isEmpty || id <= 0) {
+      print("Dati insufficienti per generare il percorso Supabase (ente o id mancanti).");
       return null;
     }
 
     // Construct the storage path EXACTLY matching your bucket structure
-    final String imagePath = 'personale/foto/${universita}_$id.jpg'; // Example: 'personale/foto/UNIBO_36941.jpg'
+    final String imagePath = 'personale/foto/${ente}_$id.jpg'; // Example: 'personale/foto/UNIBO_36941.jpg'
     const String bucketName = 'una-bucket'; // Your bucket name
     const int expiresIn = 3600; // Signed URL validity duration (seconds)
 

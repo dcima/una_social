@@ -13,11 +13,39 @@ import 'package:una_social_app/screens/splash_screen.dart';
 import 'package:una_social_app/screens/database_screen.dart';
 import 'package:una_social_app/screens/unauthorized_screen.dart'; // *** Importa una schermata per accesso negato ***
 
-// Helper per verificare se l'utente è amministratore
-bool _isUserAdmin(User? user) {
-  if (user == null) return false;
-  // Controlla app_metadata per il ruolo. Adatta se usi user_metadata.
-  return user.appMetadata['role'] == 'admin';
+// Helper SINCRONO per verificare se l'utente è SUPER_ADMIN basandosi sui custom claims
+bool _isUserSuperAdminSync(User? user) {
+  if (user == null) {
+    // print("Router Check (Sync): Utente nullo, non è Super Admin.");
+    return false;
+  }
+
+  // Adatta questo percorso al tuo setup di custom claims effettivo.
+  // Esempio: user.appMetadata['groups']
+  // Potrebbe anche essere user.userMetadata['groups'] o un claim custom.
+  final dynamic groupsClaim = user.appMetadata['groups'];
+
+  if (groupsClaim == null) {
+    // print("Router Check (Sync): Claim 'groups' nullo in appMetadata per ${user.email}.");
+    return false;
+  }
+
+  if (groupsClaim is List) {
+    try {
+      // Assicura che gli elementi siano stringhe
+      final List<String> userGroups = List<String>.from(groupsClaim.map((item) => item.toString()));
+      // Controlla se il gruppo 'SUPER-ADMIN' è presente (case-sensitive)
+      final bool isAdmin = userGroups.contains('SUPER_ADMIN'); // CAMBIA 'SUPER-ADMIN' SE IL TUO GRUPPO HA UN NOME DIVERSO
+      // print("Router Check (Sync): Utente ${user.email}, Gruppi (da claim): $userGroups, È Super Admin: $isAdmin");
+      return isAdmin;
+    } catch (e) {
+      print("Router Check (Sync): Errore durante la conversione dei gruppi da claim per ${user.email}: $e");
+      return false;
+    }
+  } else {
+    // print("Router Check (Sync): Claim 'groups' per ${user.email} non è una lista, tipo: ${groupsClaim.runtimeType}");
+    return false;
+  }
 }
 
 class GoRouterRefreshStream extends ChangeNotifier {
@@ -119,12 +147,9 @@ class AppRouter {
           }
 
           // 2. Se loggato e password impostata, controlla il ruolo
-          if (!_isUserAdmin(user)) {
+          if (!_isUserSuperAdminSync(user)) {
             print('[GoRouter Redirect /database] User is not admin. Redirecting to /unauthorized.');
-            // Opzione 1: Reindirizza a una pagina di "Accesso Negato"
             return '/unauthorized';
-            // Opzione 2: Reindirizza a /home (meno informativo per l'utente)
-            // return '/home';
           }
           // Se tutti i controlli passano, permette l'accesso
           return null;
@@ -148,7 +173,7 @@ class AppRouter {
       final bool passwordSet = user?.userMetadata?['has_set_password'] == true;
       final String currentMatchedLocation = state.matchedLocation;
 
-      print('[GoRouter Global Redirect] Path: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet, isAdmin: ${_isUserAdmin(user)}');
+      print('[GoRouter Global Redirect] Path: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet, isAdmin: ${_isUserSuperAdminSync(user)}');
 
       final isPublicRoute = (currentMatchedLocation == '/login' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/' || currentMatchedLocation == '/unauthorized'); // Anche unauthorized è pubblica
 
@@ -163,7 +188,7 @@ class AppRouter {
         if (passwordSet && (currentMatchedLocation == '/login' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/set-password' || currentMatchedLocation == '/')) {
           // Eccezione: se sta andando a /database E NON è admin, il redirect di /database lo manderà a /unauthorized.
           // Non vogliamo che questo redirect globale lo mandi di nuovo a /home.
-          if (currentMatchedLocation == '/database' && !_isUserAdmin(user)) {
+          if (currentMatchedLocation == '/database' && !_isUserSuperAdminSync(user)) {
             return null; // Lascia che il redirect di /database gestisca
           }
           print('[GoRouter Global Redirect] Logged in & PwdSet. Redirecting from $currentMatchedLocation to /home.');
