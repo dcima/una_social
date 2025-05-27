@@ -1,5 +1,5 @@
 // lib/personale_profile.dart
-// ignore_for_file: avoid_print, deprecated_member_use
+// ignore_for_file: avoid_print, deprecated_member_use, non_constant_identifier_names
 
 import 'dart:typed_data'; // Required for Uint8List
 import 'package:flutter/material.dart';
@@ -27,7 +27,6 @@ class ContactEntryItem {
   }
 
   void dispose() {
-    // //print('ContactEntryItem.dispose(): key ${uniqueKey.toString()}');
     tagController.dispose();
     valueController.dispose();
   }
@@ -43,9 +42,38 @@ class RuoloEntryItem {
   String get text => controller.text.trim();
 
   void dispose() {
-    // //print('RuoloEntryItem.dispose(): key ${uniqueKey.toString()}');
     controller.dispose();
   }
+}
+
+// Helper per le Strutture
+class StrutturaItem {
+  final String universita;
+  final String id;
+  final String nome;
+
+  StrutturaItem({
+    required this.universita,
+    required this.id,
+    required this.nome,
+  });
+
+  @override
+  String toString() => nome;
+
+  factory StrutturaItem.fromJson(Map<String, dynamic> json) {
+    return StrutturaItem(
+      universita: json['universita'] as String? ?? '', // Più robusto a null
+      id: json['id']?.toString() ?? '', // Converti a String e gestisci null
+      nome: json['nome'] as String? ?? '', // Più robusto a null
+    );
+  }
+
+  @override
+  bool operator ==(Object other) => identical(this, other) || other is StrutturaItem && runtimeType == other.runtimeType && id == other.id && universita == other.universita;
+
+  @override
+  int get hashCode => id.hashCode ^ universita.hashCode;
 }
 
 class PersonaleProfile extends StatefulWidget {
@@ -66,7 +94,6 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   final _supabase = Supabase.instance.client;
 
   late TextEditingController _enteController;
-  late TextEditingController _strutturaController;
   late TextEditingController _emailPrincipaleController;
   late TextEditingController _nomeController;
   late TextEditingController _cognomeController;
@@ -76,36 +103,46 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   late TextEditingController _rssController;
   late TextEditingController _webController;
 
+  late TextEditingController _strutturaInputController;
+  StrutturaItem? _selectedStrutturaItem;
+  bool _isLoadingStrutture = false;
+
   final List<RuoloEntryItem> _ruoliEntries = [];
   final List<ContactEntryItem> _altreEmailEntries = [];
   final List<ContactEntryItem> _phoneEntries = [];
 
   XFile? _pickedImageFile;
   bool _isDirty = false;
-  bool _isLoading = false; // Loading generale per salvataggio/upload
+  bool _isLoading = false;
 
-  String? _currentDisplayImageUrl; // URL attualmente usato per visualizzare l'immagine
-  bool _isLoadingDisplayImageUrl = true; // Loading per fetch signed URL o per Image.network
-  bool _displayImageFailedToLoad = false; // Flag per errore caricamento immagine
+  String? _currentDisplayImageUrl;
+  bool _isLoadingDisplayImageUrl = true;
+  bool _displayImageFailedToLoad = false;
 
   final String _bucketName = 'una-bucket';
   final String _baseFolderPath = 'personale/foto';
 
   @override
   void initState() {
-    //print('_PersonaleProfileState.initState: Loading profile for ${widget.initialPersonale.fullName} (ID: ${widget.initialPersonale.id})');
     super.initState();
     _initializeControllers();
     _initializeDynamicLists();
-    _addListenersToDynamicEntries(); // Chiama questo DOPO _initializeDynamicLists
-    _addListenersToStaticControllers();
+    _addListenersToStaticControllers(); // Chiamare prima di _addListenersToDynamicEntries se le liste dinamiche dipendono da controller statici (non in questo caso)
+    _addListenersToDynamicEntries();
     _fetchDisplayImageUrl();
+
+    final String initialEnte = (widget.initialPersonale.ente).trim();
+    final String initialStrutturaCodice = (widget.initialPersonale.struttura).trim();
+
+    if (initialStrutturaCodice.isNotEmpty && initialEnte.isNotEmpty) {
+      _loadInitialStruttura(initialStrutturaCodice, initialEnte);
+    } else {
+      print('_PersonaleProfileState.initState: Skipping _loadInitialStruttura. Ente: "$initialEnte", StrutturaCodice: "$initialStrutturaCodice"');
+    }
   }
 
   void _initializeControllers() {
-    //print('_PersonaleProfileState._initializeControllers');
     _enteController = TextEditingController(text: widget.initialPersonale.ente);
-    _strutturaController = TextEditingController(text: widget.initialPersonale.struttura);
     _emailPrincipaleController = TextEditingController(text: widget.initialPersonale.emailPrincipale);
     _nomeController = TextEditingController(text: widget.initialPersonale.nome);
     _cognomeController = TextEditingController(text: widget.initialPersonale.cognome);
@@ -114,58 +151,143 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
     _noteBiograficheController = TextEditingController(text: widget.initialPersonale.noteBiografiche);
     _rssController = TextEditingController(text: widget.initialPersonale.rss);
     _webController = TextEditingController(text: widget.initialPersonale.web);
+    _strutturaInputController = TextEditingController();
+  }
+
+  Future<void> _loadInitialStruttura(String strutturaCodiceInput, String enteCodiceInput) async {
+    final String strutturaCodice = strutturaCodiceInput.trim();
+    final String enteCodice = enteCodiceInput.trim();
+
+    print('_loadInitialStruttura: Attempting to load struttura "$strutturaCodice" for ente "$enteCodice"');
+
+    if (strutturaCodice.isEmpty || enteCodice.isEmpty) {
+      print('_loadInitialStruttura: Aborted. Ente or StrutturaCodice is empty after trim.');
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _isLoadingStrutture = true);
+
+    try {
+      final response = await _supabase
+          .from('strutture')
+          .select('universita, id, nome') // Nomi campi corretti e senza spazi extra
+          .eq('universita', enteCodice)
+          .eq('id', strutturaCodice)
+          .maybeSingle();
+
+      print('_loadInitialStruttura: Response from Supabase: $response');
+
+      if (response != null && mounted) {
+        final struttura = StrutturaItem.fromJson(response);
+        setState(() {
+          _selectedStrutturaItem = struttura;
+          _strutturaInputController.text = struttura.nome;
+          print('_loadInitialStruttura: Successfully loaded: ${struttura.nome} (ID: ${struttura.id}, Ente: ${struttura.universita})');
+        });
+      } else {
+        print('_loadInitialStruttura: Struttura NOT FOUND for codice "$strutturaCodice" / ente "$enteCodice". Response was null.');
+        if (mounted) {
+          _strutturaInputController.text = widget.initialPersonale.struttura.trim();
+          _selectedStrutturaItem = null;
+          if (ScaffoldMessenger.maybeOf(context) != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Struttura "$strutturaCodice" non trovata per l\'ente "$enteCodice".'),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 5),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e, s) {
+      print('_loadInitialStruttura: ERROR fetching initial struttura: $e');
+      print('_loadInitialStruttura: STACKTRACE: $s');
+      if (mounted) {
+        _strutturaInputController.text = widget.initialPersonale.struttura.trim();
+        _selectedStrutturaItem = null;
+        if (ScaffoldMessenger.maybeOf(context) != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Errore caricamento dati struttura: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isLoadingStrutture = false);
+    }
   }
 
   void _initializeDynamicLists() {
-    //print('_PersonaleProfileState._initializeDynamicLists');
     _ruoliEntries.clear();
-    if (widget.initialPersonale.ruoli != null) {
-      for (var ruoloText in widget.initialPersonale.ruoli!) {
-        _ruoliEntries.add(RuoloEntryItem(testo: ruoloText));
-      }
+    for (var ruoloText in (widget.initialPersonale.ruoli ?? [])) {
+      _ruoliEntries.add(RuoloEntryItem(testo: ruoloText));
     }
-    //print('  Ruoli init: ${_ruoliEntries.length}');
 
     _altreEmailEntries.clear();
-    if (widget.initialPersonale.altreEmails != null) {
-      for (var emailMap in widget.initialPersonale.altreEmails!) {
-        _altreEmailEntries.add(ContactEntryItem(t: emailMap['t'] ?? '', v: emailMap['v'] ?? ''));
-      }
+    for (var emailMap in (widget.initialPersonale.altreEmails ?? [])) {
+      _altreEmailEntries.add(ContactEntryItem(t: emailMap['t'] ?? '', v: emailMap['v'] ?? ''));
     }
-    //print('  AltreEmailEntries init: ${_altreEmailEntries.length}');
 
     _phoneEntries.clear();
-    if (widget.initialPersonale.telefoni != null) {
-      for (var phoneMap in widget.initialPersonale.telefoni!) {
-        _phoneEntries.add(ContactEntryItem(t: phoneMap['t'] ?? '', v: phoneMap['v'] ?? ''));
-      }
+    for (var phoneMap in (widget.initialPersonale.telefoni ?? [])) {
+      _phoneEntries.add(ContactEntryItem(t: phoneMap['t'] ?? '', v: phoneMap['v'] ?? ''));
     }
-    //print('  PhoneEntries init: ${_phoneEntries.length}');
   }
 
   void _addListenersToStaticControllers() {
-    final staticControllers = [_enteController, _strutturaController, _emailPrincipaleController, _nomeController, _cognomeController, _photoUrlController, _cvController, _noteBiograficheController, _rssController, _webController];
+    final List<TextEditingController> staticControllers = [_emailPrincipaleController, _nomeController, _cognomeController, _photoUrlController, _cvController, _noteBiograficheController, _rssController, _webController];
     for (var controller in staticControllers) {
       controller.addListener(_markDirty);
     }
+
+    _enteController.addListener(_handleEnteChange);
+    _strutturaInputController.addListener(_handleStrutturaInputChange);
   }
 
-  // Aggiunge listener alle entry già presenti nelle liste
+  void _handleEnteChange() {
+    _markDirty();
+    if (mounted) {
+      final String oldEnte = (widget.initialPersonale.ente).trim();
+      final String newEnte = _enteController.text.trim();
+      if (oldEnte != newEnte) {
+        print('Ente changed from "$oldEnte" to "$newEnte". Resetting struttura field.');
+        setState(() {
+          _strutturaInputController.clear();
+          _selectedStrutturaItem = null;
+        });
+        // Non è necessario validare il form qui, lo farà l'utente o il salvataggio
+      }
+    }
+  }
+
+  void _handleStrutturaInputChange() {
+    final String currentInputText = _strutturaInputController.text.trim();
+    if (currentInputText.isEmpty && _selectedStrutturaItem != null) {
+      // Utente ha cancellato il testo, deseleziona
+      setState(() => _selectedStrutturaItem = null);
+      _markDirty();
+    } else if (_selectedStrutturaItem != null && currentInputText != _selectedStrutturaItem!.nome) {
+      // Utente ha modificato il testo di una struttura selezionata, invalidala
+      setState(() => _selectedStrutturaItem = null);
+      _markDirty();
+    } else if (currentInputText.isNotEmpty && _selectedStrutturaItem == null) {
+      // Utente sta scrivendo, non c'è ancora una selezione valida
+      _markDirty();
+    }
+    // Se il testo corrisponde alla selezione, non fare nulla di speciale qui per _markDirty
+    // _markDirty è già chiamato se il testo cambia
+  }
+
   void _addListenersToDynamicEntries() {
-    //print('_PersonaleProfileState._addListenersToDynamicEntries');
     for (var entry in _ruoliEntries) {
-      entry.controller.removeListener(_markDirty); // Rimuovi vecchio se presente
       entry.controller.addListener(_markDirty);
     }
     for (var entry in _altreEmailEntries) {
-      entry.tagController.removeListener(_markDirty);
-      entry.valueController.removeListener(_markDirty);
       entry.tagController.addListener(_markDirty);
       entry.valueController.addListener(_markDirty);
     }
     for (var entry in _phoneEntries) {
-      entry.tagController.removeListener(_markDirty);
-      entry.valueController.removeListener(_markDirty);
       entry.tagController.addListener(_markDirty);
       entry.valueController.addListener(_markDirty);
     }
@@ -173,12 +295,29 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
   @override
   void dispose() {
-    //print('_PersonaleProfileState.dispose: Disposing controllers for ${widget.initialPersonale.fullName}');
-    final staticControllers = [_enteController, _strutturaController, _emailPrincipaleController, _nomeController, _cognomeController, _photoUrlController, _cvController, _noteBiograficheController, _rssController, _webController];
-    for (var controller in staticControllers) {
-      controller.removeListener(_markDirty);
+    // Rimuovi prima i listener specifici
+    _enteController.removeListener(_handleEnteChange);
+    _strutturaInputController.removeListener(_handleStrutturaInputChange);
+
+    // Lista di tutti i controller statici per dispose e rimozione _markDirty
+    final List<TextEditingController> allStaticControllers = [
+      _enteController, _emailPrincipaleController, _nomeController,
+      _cognomeController, _photoUrlController, _cvController,
+      _noteBiograficheController, _rssController, _webController,
+      _strutturaInputController // Anche questo è un controller da disporre
+    ];
+
+    for (var controller in allStaticControllers) {
+      // _markDirty potrebbe essere stato aggiunto più volte se non gestito attentamente,
+      // ma removeListener lo rimuove solo una volta se presente.
+      // Se hai aggiunto _markDirty specificamente a _enteController e _strutturaInputController,
+      // assicurati che sia rimosso. Dato che _markDirty è generico, potrebbe essere sufficiente
+      // la rimozione automatica con dispose se aggiunto come unico listener.
+      // Per sicurezza, rimuovi esplicitamente:
+      controller.removeListener(_markDirty); // Se _markDirty era un listener diretto
       controller.dispose();
     }
+
     for (var entry in _ruoliEntries) {
       entry.controller.removeListener(_markDirty);
       entry.dispose();
@@ -201,54 +340,92 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
   void _markDirty() {
     if (!_isDirty && mounted) {
+      // print("Marking dirty");
       setState(() => _isDirty = true);
     }
   }
 
   Future<void> _fetchDisplayImageUrl() async {
-    //print('_PersonaleProfileState._fetchDisplayImageUrl');
-
-    if (!mounted) {
-      return;
-    }
-
+    if (!mounted) return;
     String photoUrl = widget.initialPersonale.photoUrl ?? '';
     String urlInController = _photoUrlController.text.trim();
     bool isControllerUrlValid = Uri.tryParse(urlInController)?.hasAbsolutePath == true;
 
-    if (photoUrl != '') {
-      //print('Using signedPhotoUrl: $photoUrl');
+    if (photoUrl.isNotEmpty) {
       if (mounted) {
         setState(() {
           _currentDisplayImageUrl = photoUrl;
-          _isLoadingDisplayImageUrl = false; // Finito il loading dell'URL, ora tocca a Image.network
-          _displayImageFailedToLoad = false; // Resetta il flag di errore per il nuovo URL
+          _isLoadingDisplayImageUrl = false;
+          _displayImageFailedToLoad = false;
         });
       }
     } else if (isControllerUrlValid) {
-      // L'URL nel controller è già un URL assoluto, usiamolo direttamente.
-      // Image.network gestirà il suo loading.
       if (_currentDisplayImageUrl != urlInController || _displayImageFailedToLoad) {
-        //print('  Using direct URL from controller: $urlInController');
         if (mounted) {
           setState(() {
             _currentDisplayImageUrl = urlInController;
-            _isLoadingDisplayImageUrl = false; // Finito il loading dell'URL, ora tocca a Image.network
-            _displayImageFailedToLoad = false; // Resetta il flag di errore per il nuovo URL
+            _isLoadingDisplayImageUrl = false;
+            _displayImageFailedToLoad = false;
           });
         }
       } else {
-        // URL non cambiato e non in errore, non serve setState se non per _isLoadingDisplayImageUrl
         if (mounted && _isLoadingDisplayImageUrl) {
           setState(() => _isLoadingDisplayImageUrl = false);
         }
       }
-      return;
+    } else {
+      if (mounted) {
+        setState(() {
+          _currentDisplayImageUrl = null;
+          _isLoadingDisplayImageUrl = false;
+          _displayImageFailedToLoad = false;
+        });
+      }
+    }
+  }
+
+  Future<Iterable<StrutturaItem>> _fetchStruttureSuggestions(TextEditingValue textEditingValue) async {
+    final String inputText = textEditingValue.text.trim();
+    final String currentEnte = _enteController.text.trim();
+
+    if (inputText.length < 3 || currentEnte.isEmpty) {
+      return const Iterable<StrutturaItem>.empty();
+    }
+    if (!mounted) return const Iterable<StrutturaItem>.empty();
+
+    // setState(() => _isLoadingStrutture = true); // Potrebbe essere utile per feedback visivo
+    try {
+      final isNumeric = RegExp(r'^[0-9]+$').hasMatch(inputText);
+      var query = _supabase.from('strutture').select('universita, id, nome').eq('universita', currentEnte);
+
+      if (isNumeric) {
+        query = query.like('id', '%$inputText%');
+      } else {
+        query = query.ilike('nome', '%$inputText%');
+      }
+
+      final response = await query.limit(15);
+
+      // Supabase restituisce List<dynamic>, quindi castiamo esplicitamente
+      final List<Map<String, dynamic>> dataList = List<Map<String, dynamic>>.from(response);
+      final suggestions = dataList.map((data) => StrutturaItem.fromJson(data)).toList();
+      return suggestions;
+    } catch (e, s) {
+      print('_fetchStruttureSuggestions: ERROR: $e');
+      print('_fetchStruttureSuggestions: STACKTRACE: $s');
+      if (mounted && ScaffoldMessenger.maybeOf(context) != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Errore ricerca strutture: $e'), backgroundColor: Colors.red),
+        );
+      }
+      return const Iterable<StrutturaItem>.empty();
+    } finally {
+      // if (mounted) setState(() => _isLoadingStrutture = false);
     }
   }
 
   void _addRuoloEntry() {
-    //print('_PersonaleProfileState._addRuoloEntry');
+    /* ... codice invariato ... */
     setState(() {
       final newEntry = RuoloEntryItem();
       newEntry.controller.addListener(_markDirty);
@@ -258,7 +435,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _removeRuoloEntry(RuoloEntryItem entry) {
-    //print('_PersonaleProfileState._removeRuoloEntry: key ${entry.uniqueKey}');
+    /* ... codice invariato ... */
     setState(() {
       entry.controller.removeListener(_markDirty);
       entry.dispose();
@@ -268,7 +445,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _addAltraEmailEntry() {
-    //print('_PersonaleProfileState._addAltraEmailEntry');
+    /* ... codice invariato ... */
     setState(() {
       final newEntry = ContactEntryItem(t: '', v: '');
       newEntry.tagController.addListener(_markDirty);
@@ -279,7 +456,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _removeAltraEmailEntry(ContactEntryItem entry) {
-    //print('_PersonaleProfileState._removeAltraEmailEntry: key ${entry.uniqueKey}');
+    /* ... codice invariato ... */
     setState(() {
       entry.tagController.removeListener(_markDirty);
       entry.valueController.removeListener(_markDirty);
@@ -290,7 +467,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _addPhoneEntry() {
-    //print('_PersonaleProfileState._addPhoneEntry');
+    /* ... codice invariato ... */
     setState(() {
       final newEntry = ContactEntryItem(t: '', v: '');
       newEntry.tagController.addListener(_markDirty);
@@ -301,7 +478,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _removePhoneEntry(ContactEntryItem entry) {
-    //print('_PersonaleProfileState._removePhoneEntry: key ${entry.uniqueKey}');
+    /* ... codice invariato ... */
     setState(() {
       entry.tagController.removeListener(_markDirty);
       entry.valueController.removeListener(_markDirty);
@@ -312,7 +489,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   Future<void> _pickAndUploadImage() async {
-    //print('_PersonaleProfileState._pickAndUploadImage');
+    /* ... codice invariato con aggiunta ScaffoldMessenger.maybeOf(context) ... */
     if (_isLoading) return;
     setState(() => _isLoading = true);
     _pickedImageFile = null;
@@ -326,38 +503,36 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
       }
       _pickedImageFile = picked;
       final Uint8List imageBytes = await _pickedImageFile!.readAsBytes();
-      final String fileName = '${widget.initialPersonale.ente}_${widget.initialPersonale.id}.jpg';
+      final String fileName = '${_enteController.text.trim().replaceAll(' ', '_')}_${widget.initialPersonale.id}.jpg'; // Usa l'ente dal controller
       final String filePath = '$_baseFolderPath/$fileName';
 
-      //print('  Uploading image to: $filePath');
       await _supabase.storage.from(_bucketName).uploadBinary(
             filePath,
             imageBytes,
             fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
           );
 
-      // Ottieni un URL pubblico con timestamp per forzare l'aggiornamento della cache
       final String publicUrl = _supabase.storage.from(_bucketName).getPublicUrl(filePath);
       final String urlWithTimestamp = "$publicUrl?t=${DateTime.now().millisecondsSinceEpoch}";
-      //print('  Image uploaded, new URL with timestamp: $urlWithTimestamp');
 
       if (mounted) {
-        _photoUrlController.text = urlWithTimestamp; // Aggiorna il controller del TextFormField
-        _markDirty(); // Segna che ci sono modifiche da salvare
-        // Aggiorna l'URL di visualizzazione e resetta i flag
+        _photoUrlController.text = urlWithTimestamp;
+        _markDirty();
         setState(() {
           _currentDisplayImageUrl = urlWithTimestamp;
           _displayImageFailedToLoad = false;
-          _isLoadingDisplayImageUrl = false; // Abbiamo un URL, Image.network gestirà il suo loading
+          _isLoadingDisplayImageUrl = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Immagine caricata con successo.'), backgroundColor: Colors.green),
-        );
+        if (ScaffoldMessenger.maybeOf(context) != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Immagine caricata con successo.'), backgroundColor: Colors.green),
+          );
+        }
       }
       _pickedImageFile = null;
-    } catch (e) {
-      //print('  Error uploading image: $e');
-      if (mounted) {
+    } catch (e, s) {
+      print('_pickAndUploadImage Error: $e, Stack: $s');
+      if (mounted && ScaffoldMessenger.maybeOf(context) != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Errore caricamento immagine: $e'), backgroundColor: Colors.red),
         );
@@ -368,19 +543,21 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   Future<void> _updateProfile() async {
-    //print('_PersonaleProfileState._updateProfile');
-    if (!_formKey.currentState!.validate()) {
-      //print('  Form validation failed.');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Per favore, correggi gli errori nel modulo.'), backgroundColor: Colors.orange),
-      );
+    /* ... codice invariato con aggiunta ScaffoldMessenger.maybeOf(context) e null check per struttura ... */
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      if (mounted && ScaffoldMessenger.maybeOf(context) != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Per favore, correggi gli errori nel modulo.'), backgroundColor: Colors.orange),
+        );
+      }
       return;
     }
     if (!_isDirty) {
-      // Controllo _isDirty dopo la validazione
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nessuna modifica rilevata.'), backgroundColor: Colors.blueGrey),
-      );
+      if (mounted && ScaffoldMessenger.maybeOf(context) != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Nessuna modifica rilevata.'), backgroundColor: Colors.blueGrey),
+        );
+      }
       return;
     }
     if (_isLoading) return;
@@ -393,7 +570,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
     final Map<String, dynamic> updateData = {
       'ente': _enteController.text.trim(),
-      'struttura': _strutturaController.text.trim(),
+      'struttura': _selectedStrutturaItem?.id, // Salva l'ID della struttura, sarà null se non selezionata
       'email_principale': _emailPrincipaleController.text.trim(),
       'nome': _nomeController.text.trim(),
       'cognome': _cognomeController.text.trim(),
@@ -407,23 +584,26 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
       'telefoni': updatedPhones.isNotEmpty ? updatedPhones : null,
     };
 
-    //print('  Data to update (altre_emails): $updatedAltreEmails');
-    //print('  Data to update (telefoni): $updatedPhones');
-
     try {
       await _supabase.from('personale').update(updateData).eq('uuid', widget.initialPersonale.uuid);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profilo aggiornato!'), backgroundColor: Colors.green),
-        );
-        await _personaleController.reload(); // Ricarica i dati nel controller GetX
+        if (ScaffoldMessenger.maybeOf(context) != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profilo aggiornato!'), backgroundColor: Colors.green),
+          );
+        }
+        // Aggiorna initialPersonale.ente e initialPersonale.struttura per il listener di _enteController
+        widget.initialPersonale.ente = _enteController.text.trim();
+        widget.initialPersonale.struttura = _selectedStrutturaItem!.id; // Può essere null
+
+        await _personaleController.reload();
         if (!mounted) return;
-        setState(() => _isDirty = false); // Resetta lo stato dirty dopo il salvataggio
-        // Navigator.of(context).pop(); // Togli il commento se vuoi chiudere il dialogo automaticamente
+        setState(() => _isDirty = false);
+        // Navigator.of(context).pop();
       }
-    } catch (e) {
-      //print('  Error updating profile: $e');
-      if (mounted) {
+    } catch (e, s) {
+      print('_updateProfile Error: $e, Stack: $s');
+      if (mounted && ScaffoldMessenger.maybeOf(context) != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Errore aggiornamento: $e'), backgroundColor: Colors.red),
         );
@@ -434,6 +614,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   Widget _buildRuoloEntryRow(RuoloEntryItem entry) {
+    /* ... codice invariato ... */
     return Padding(
       key: entry.uniqueKey,
       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -471,6 +652,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
     required IconData valueIcon,
     required String? Function(String?)? valueValidator,
   }) {
+    /* ... codice invariato ... */
     return Padding(
       key: entry.uniqueKey,
       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -518,18 +700,18 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
   @override
   Widget build(BuildContext context) {
-    //print('_PersonaleProfileState.build: AltreEmail count: ${_altreEmailEntries.length}, Phone count: ${_phoneEntries.length}');
-
     Widget photoDisplayWidget;
     const double avatarDisplaySize = 100.0;
 
     if (_isLoadingDisplayImageUrl) {
+      /* ... codice invariato ... */
       photoDisplayWidget = SizedBox(
         width: avatarDisplaySize,
         height: avatarDisplaySize,
         child: Center(child: Tooltip(message: "Caricamento URL immagine...", child: CircularProgressIndicator(strokeWidth: 2))),
       );
     } else if (_displayImageFailedToLoad || _currentDisplayImageUrl == null || _currentDisplayImageUrl!.trim().isEmpty) {
+      /* ... codice invariato ... */
       IconData iconData = Icons.person_outline;
       Color iconColor = Colors.grey.shade400;
       Color backgroundColor = Colors.grey.shade200;
@@ -555,6 +737,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
         ),
       );
     } else {
+      /* ... codice invariato ... */
       photoDisplayWidget = SizedBox(
         width: avatarDisplaySize,
         height: avatarDisplaySize,
@@ -563,7 +746,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
             fit: BoxFit.contain,
             child: Image.network(
               _currentDisplayImageUrl!,
-              key: ValueKey(_currentDisplayImageUrl!), // Semplificata la chiave, Image.network gestisce la cache
+              key: ValueKey(_currentDisplayImageUrl!),
               loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
                 if (loadingProgress == null) return child;
                 return Center(
@@ -574,19 +757,16 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
                 );
               },
               errorBuilder: (BuildContext context, Object exception, StackTrace? stackTrace) {
-                //print("  Image.network errorBuilder for $_currentDisplayImageUrl: $exception");
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted && !_displayImageFailedToLoad) {
-                    // Evita loop di setState
                     setState(() {
                       _displayImageFailedToLoad = true;
-                      // _currentDisplayImageUrl = null; // Opzionale: pulire l'URL fallito
                     });
                   }
                 });
                 return Container(
-                  // Placeholder mostrato immediatamente durante l'errore
-                  width: avatarDisplaySize, height: avatarDisplaySize,
+                  width: avatarDisplaySize,
+                  height: avatarDisplaySize,
                   color: Colors.red.shade50,
                   child: Icon(Icons.error_outline, color: Colors.red.shade300, size: avatarDisplaySize * 0.5),
                 );
@@ -626,9 +806,6 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
                   keyboardType: TextInputType.url,
                   onChanged: (value) {
                     _markDirty();
-                    // Se l'utente cambia l'URL, tentiamo di ricaricare l'immagine.
-                    // _fetchDisplayImageUrl gestirà la logica per usare questo URL
-                    // o generare un signed URL se questo è vuoto/invalido.
                     _fetchDisplayImageUrl();
                   },
                   validator: (value) {
@@ -643,7 +820,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
                   controller: _enteController,
                   decoration: const InputDecoration(labelText: 'Ente *', border: OutlineInputBorder()),
                   validator: (value) => (value == null || value.trim().isEmpty) ? 'L\'ente è obbligatorio' : null,
-                  onChanged: (_) => _markDirty(),
+                  // onChanged è gestito da _handleEnteChange
                 ),
                 const SizedBox(height: 15),
                 Row(
@@ -668,13 +845,110 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
                   ],
                 ),
                 const SizedBox(height: 15),
-                TextFormField(
-                  controller: _strutturaController,
-                  decoration: const InputDecoration(labelText: 'Struttura *', border: OutlineInputBorder()),
-                  validator: (value) => (value == null || value.trim().isEmpty) ? 'La struttura è obbligatoria' : null,
-                  onChanged: (_) => _markDirty(),
+
+                // --- CAMPO STRUTTURA CON AUTOCOMPLETE ---
+                Autocomplete<StrutturaItem>(
+                  optionsBuilder: _fetchStruttureSuggestions,
+                  displayStringForOption: (StrutturaItem option) => option.nome,
+                  fieldViewBuilder: (BuildContext context, TextEditingController fieldTextEditingController, FocusNode fieldFocusNode, VoidCallback onFieldSubmitted) {
+                    // Sincronizza il controller di Autocomplete con il nostro _strutturaInputController
+                    // Questo è importante per il caricamento iniziale e se il nostro controller viene modificato programmaticamente
+                    if (_strutturaInputController.text != fieldTextEditingController.text) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted && _strutturaInputController.text != fieldTextEditingController.text) {
+                          fieldTextEditingController.text = _strutturaInputController.text;
+                          // Muovi il cursore alla fine dopo aver impostato il testo programmaticamente
+                          fieldTextEditingController.selection = TextSelection.fromPosition(TextPosition(offset: fieldTextEditingController.text.length));
+                        }
+                      });
+                    }
+                    return TextFormField(
+                      controller: fieldTextEditingController,
+                      focusNode: fieldFocusNode,
+                      decoration: InputDecoration(
+                        labelText: 'Struttura *',
+                        hintText: _enteController.text.trim().isEmpty ? 'Seleziona prima un Ente' : 'Digita min. 3 caratteri...',
+                        border: const OutlineInputBorder(),
+                        suffixIcon: (_isLoadingStrutture)
+                            ? const Padding(padding: EdgeInsets.all(8.0), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                            : (fieldTextEditingController.text.isNotEmpty && _selectedStrutturaItem == null
+                                ? IconButton(
+                                    tooltip: 'Cancella testo struttura',
+                                    icon: const Icon(Icons.clear),
+                                    onPressed: () {
+                                      fieldTextEditingController.clear(); // Cancella il testo nel campo di Autocomplete
+                                      _strutturaInputController.clear(); // Sincronizza il nostro controller
+                                      setState(() => _selectedStrutturaItem = null);
+                                      _markDirty();
+                                      // _formKey.currentState?.validate(); // Opzionale: rivalida subito
+                                    })
+                                : null),
+                      ),
+                      validator: (value) {
+                        final String val = value?.trim() ?? '';
+                        if (val.isEmpty) {
+                          return 'La struttura è obbligatoria.';
+                        }
+                        // Se l'utente ha scritto qualcosa ma non ha selezionato un item dalla lista
+                        if (_selectedStrutturaItem == null && val.isNotEmpty) {
+                          return 'Seleziona una struttura valida dall\'elenco o cancella il testo.';
+                        }
+                        // Se l'item selezionato non corrisponde più al testo nel campo (es. utente ha modificato dopo selezione)
+                        if (_selectedStrutturaItem != null && _selectedStrutturaItem!.nome.trim() != val) {
+                          // Questo caso dovrebbe essere gestito da _handleStrutturaInputChange deselezionando _selectedStrutturaItem,
+                          // quindi ricadrebbe nel caso precedente.
+                          return 'Il testo non corrisponde alla struttura selezionata. Riscegli dall\'elenco.';
+                        }
+                        return null;
+                      },
+                      onChanged: (text) {
+                        // Aggiorna il nostro _strutturaInputController per mantenere la sincronia.
+                        // La logica di _markDirty e deselezione è in _handleStrutturaInputChange.
+                        _strutturaInputController.text = text;
+                      },
+                    );
+                  },
+                  onSelected: (StrutturaItem selection) {
+                    print('Struttura selezionata: ${selection.nome} (ID: ${selection.id})');
+                    setState(() {
+                      _selectedStrutturaItem = selection;
+                      _strutturaInputController.text = selection.nome; // Sincronizza il nostro controller
+                      _markDirty();
+                    });
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      // Per evitare problemi di validazione durante build
+                      _formKey.currentState?.validate();
+                    });
+                  },
+                  optionsViewBuilder: (BuildContext context, AutocompleteOnSelected<StrutturaItem> onSelected, Iterable<StrutturaItem> options) {
+                    return Align(
+                      alignment: Alignment.topLeft,
+                      child: Material(
+                        elevation: 4.0,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: 250, maxWidth: MediaQuery.of(context).size.width - 40),
+                          child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            itemCount: options.length,
+                            itemBuilder: (BuildContext context, int index) {
+                              final StrutturaItem option = options.elementAt(index);
+                              return InkWell(
+                                onTap: () => onSelected(option),
+                                child: ListTile(
+                                  title: Text(option.nome),
+                                  subtitle: Text('Codice: ${option.id} (${option.universita})'),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 15),
+                // --- FINE CAMPO STRUTTURA ---
+
                 TextFormField(
                   controller: _emailPrincipaleController,
                   decoration: const InputDecoration(labelText: 'Email Principale *', border: OutlineInputBorder(), prefixIcon: Icon(Icons.email)),
@@ -772,12 +1046,12 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 20), // Spazio extra in fondo per scrolling
               ],
             ),
           ),
         ),
-        if (_isLoading && ModalRoute.of(context)?.isCurrent == true) // Mostra solo se questo modale è quello corrente
+        if (_isLoading && ModalRoute.of(context)?.isCurrent == true)
           Positioned.fill(
             child: Container(
               color: Colors.black.withOpacity(0.5),

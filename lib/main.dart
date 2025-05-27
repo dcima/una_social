@@ -4,14 +4,14 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
+import 'package:get/get.dart'; // *** Importa GetX ***
 import 'package:una_social_app/app_router.dart';
-import 'package:una_social_app/helpers/auth_helper.dart'; // Importa l'helper
+import 'package:una_social_app/controllers/auth_controller.dart'; // *** Importa AuthController ***
 
-// --- ValueNotifier Globale per lo stato di autenticazione dell'app ---
-final ValueNotifier<AuthStatus> appAuthStatusNotifier = ValueNotifier(AuthStatus.loading);
-
-enum AuthStatus { loading, authenticated, unauthenticated }
-// --- FINE ValueNotifier ---
+// --- ValueNotifier Globale RIMOSSO ---
+// final ValueNotifier<AuthStatus> appAuthStatusNotifier = ValueNotifier(AuthStatus.loading);
+// enum AuthStatus { loading, authenticated, unauthenticated }
+// --- FINE ValueNotifier RIMOSSO ---
 
 const String supabaseUrlEnvKey = 'SUPABASE_URL';
 const String supabaseAnonKeyEnvKey = 'SUPABASE_ANON_KEY';
@@ -48,84 +48,27 @@ Future<void> main() async {
       authOptions: const FlutterAuthClientOptions(
         authFlowType: AuthFlowType.pkce,
       ),
-      debug: true,
+      debug: true, // Puoi impostare a false per produzione
     );
     //print("Supabase inizializzato.");
 
-    //print("Impostazione listener onAuthStateChange...");
-    Supabase.instance.client.auth.onAuthStateChange.listen(
-      (data) {
-        final AuthChangeEvent event = data.event;
-        final Session? session = data.session;
-        //print('[MAIN AUTH LISTENER] Evento Ricevuto: $event, Sessione: ${session != null ? "Presente (User ID: ${session.user.id})" : "Assente"}');
+    // *** Inizializza AuthController di GetX dopo Supabase ***
+    Get.put(AuthController(), permanent: true); // permanent: true per mantenerlo vivo durante tutta l'app
+    print("[Main] AuthController inizializzato con GetX.");
 
-        // Se l'evento NON è signedOut, e la ragione era invalidRefreshToken,
-        // la "crisi" è passata (es. l'utente si è riloggato), quindi resettiamo.
-        // Questo evita che un vecchio messaggio di "sessione scaduta" appaia dopo un login successivo.
-        if (event != AuthChangeEvent.signedOut && AuthHelper.lastLogoutReason == LogoutReason.invalidRefreshToken) {
-          AuthHelper.clearLastLogoutReason();
-        }
+    // Il listener onAuthStateChange in AuthController gestirà l'aggiornamento
+    // dello stato dei gruppi/permessi. GoRouterRefreshStream (usato da AppRouter)
+    // ascolterà anch'esso onAuthStateChange per triggerare i redirect del router.
+    // Non è più necessario un listener separato qui in main.dart per aggiornare
+    // uno stato di autenticazione globale come appAuthStatusNotifier.
+    // AuthHelper può ancora essere usato per tracciare la ragione del logout.
 
-        switch (event) {
-          case AuthChangeEvent.initialSession:
-            if (session != null && !session.isExpired) {
-              //print('[MAIN AUTH LISTENER] initialSession: Utente valido. Notifier -> authenticated.');
-              appAuthStatusNotifier.value = AuthStatus.authenticated;
-            } else {
-              //print('[MAIN AUTH LISTENER] initialSession: Nessun utente valido. Notifier -> unauthenticated.');
-              // Se la sessione iniziale non è valida e la ragione era già invalidRefreshToken (da un errore precedente),
-              // non la sovrascriviamo con 'none', lasciamo che la LoginScreen la gestisca.
-              if (AuthHelper.lastLogoutReason != LogoutReason.invalidRefreshToken) {
-                AuthHelper.clearLastLogoutReason(); // Pulisce ragioni precedenti se non è un invalid refresh
-              }
-              appAuthStatusNotifier.value = AuthStatus.unauthenticated;
-            }
-            break;
-          case AuthChangeEvent.signedIn:
-          case AuthChangeEvent.tokenRefreshed:
-          case AuthChangeEvent.mfaChallengeVerified:
-          case AuthChangeEvent.userUpdated:
-            if (appAuthStatusNotifier.value != AuthStatus.authenticated) {
-              //print('[MAIN AUTH LISTENER] Evento $event: Stato Loggato. Notifier -> authenticated.');
-              appAuthStatusNotifier.value = AuthStatus.authenticated;
-            }
-            // Se l'utente si logga con successo, qualsiasi ragione di logout precedente è irrilevante
-            AuthHelper.clearLastLogoutReason();
-            break;
-          case AuthChangeEvent.signedOut:
-          case AuthChangeEvent.userDeleted:
-            if (appAuthStatusNotifier.value != AuthStatus.unauthenticated) {
-              //print('[MAIN AUTH LISTENER] Evento $event: Stato Sloggato. Notifier -> unauthenticated.');
-              appAuthStatusNotifier.value = AuthStatus.unauthenticated;
-            }
-            // NON pulire la ragione qui, potrebbe essere stata impostata dall'onError.
-            // Se AuthHelper.lastLogoutReason è ancora LogoutReason.none,
-            // significa che il logout è stato probabilmente avviato altrove (es. user-initiated o scadenza token non gestita da onError qui).
-            // Se l'utente si è disconnesso esplicitamente, la HomeScreen dovrebbe aver impostato UserInitiated.
-            break;
-          case AuthChangeEvent.passwordRecovery:
-            //print('[MAIN AUTH LISTENER] Gestito evento passwordRecovery. Stato auth non modificato.');
-            break;
-        }
-      },
-      onError: (error) {
-        //print('[MAIN AUTH LISTENER] Errore nello stream onAuthStateChange: $error');
-        if (error is AuthException && (error.statusCode == '400' || error.message.toLowerCase().contains('invalid refresh token'))) {
-          //print('[MAIN AUTH LISTENER] Causa logout specifica: Invalid Refresh Token.');
-          AuthHelper.setLogoutReason(LogoutReason.invalidRefreshToken);
-        }
-        // Altrimenti, non impostiamo una ragione specifica qui, ma trattiamo l'errore come un potenziale logout
-        if (appAuthStatusNotifier.value != AuthStatus.unauthenticated) {
-          //print('[MAIN AUTH LISTENER] Errore stream: Notifier -> unauthenticated.');
-          appAuthStatusNotifier.value = AuthStatus.unauthenticated;
-        }
-      },
-    );
-    //print("Listener onAuthStateChange impostato.");
-  } catch (e) {
-    //print("ERRORE CRITICO init Supabase: $e");
-    //print("Stack trace: $stackTrace");
-    appAuthStatusNotifier.value = AuthStatus.unauthenticated;
+    //print("Listener onAuthStateChange in AuthController si occuperà dello stato utente.");
+  } catch (e, stackTrace) {
+    // Aggiunto stackTrace per debug
+    print("ERRORE CRITICO init Supabase: $e");
+    print("Stack trace: $stackTrace");
+    // Non possiamo usare AuthController qui se Supabase fallisce
     runApp(SupabaseErrorApp(error: "Errore inizializzazione Supabase: ${e.toString()}"));
     return;
   }
@@ -134,13 +77,14 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-// ... resto di main.dart invariato (MyApp, SupabaseErrorApp) ...
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
+    // Usa GetMaterialApp per l'integrazione completa con GetX,
+    // anche se GoRouter gestisce la navigazione principale.
+    return GetMaterialApp.router(
       title: 'Una Social',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -159,7 +103,10 @@ class MyApp extends StatelessWidget {
       ),
       themeMode: ThemeMode.system,
       debugShowCheckedModeBanner: false,
-      routerConfig: AppRouter.router,
+      // Configurazione di GoRouter
+      routerDelegate: AppRouter.router.routerDelegate,
+      routeInformationParser: AppRouter.router.routeInformationParser,
+      routeInformationProvider: AppRouter.router.routeInformationProvider,
     );
   }
 }
@@ -171,6 +118,7 @@ class SupabaseErrorApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      // Non GetMaterialApp qui, è una schermata di errore fallback
       theme: ThemeData.light(useMaterial3: true),
       darkTheme: ThemeData.dark(useMaterial3: true),
       themeMode: ThemeMode.system,

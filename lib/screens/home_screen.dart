@@ -8,7 +8,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social_app/controllers/personale_controller.dart';
 import 'package:una_social_app/helpers/auth_helper.dart';
-import 'package:una_social_app/helpers/snackbar_helper.dart';
 import 'package:una_social_app/models/personale.dart';
 import 'package:una_social_app/painters/star_painter.dart';
 import 'package:una_social_app/screens/personale_profile.dart';

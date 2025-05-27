@@ -11,45 +11,46 @@ import 'package:una_social_app/screens/login_screen.dart';
 import 'package:una_social_app/screens/set_password_screen.dart';
 import 'package:una_social_app/screens/splash_screen.dart';
 import 'package:una_social_app/screens/database_screen.dart';
-import 'package:una_social_app/screens/unauthorized_screen.dart'; // *** Importa una schermata per accesso negato ***
+import 'package:una_social_app/screens/unauthorized_screen.dart';
 
-// Helper SINCRONO per verificare se l'utente è SUPER_ADMIN basandosi sui custom claims
-bool _isUserSuperAdminSync(User? user) {
-  if (user == null) {
-    // //print("Router Check (Sync): Utente nullo, non è Super Admin.");
+final _supabase = Supabase.instance.client;
+
+// Helper ASINCRONO per verificare se l'utente è SUPER-ADMIN
+// Ora chiama direttamente la tua funzione RPC 'current_user_is_in_group'
+Future<bool> checkCurrentUserIsSuperAdmin() async {
+  // Non ha più bisogno del parametro User
+  // L'utente deve essere loggato per chiamare una funzione che usa auth.uid()
+  if (_supabase.auth.currentUser == null) {
+    print("[AppRouter] checkCurrentUserIsSuperAdmin: Utente nullo, non può essere Super Admin.");
     return false;
   }
 
-  // Adatta questo percorso al tuo setup di custom claims effettivo.
-  // Esempio: user.appMetadata['groups']
-  // Potrebbe anche essere user.userMetadata['groups'] o un claim custom.
-  final dynamic groupsClaim = user.appMetadata['groups'];
+  try {
+    const String superAdminGroupName = 'SUPER-ADMIN'; // Definisci il nome del gruppo una volta
+    print("[AppRouter] checkCurrentUserIsSuperAdmin: Chiamata RPC 'current_user_is_in_group' con parametro '$superAdminGroupName'");
 
-  if (groupsClaim == null) {
-    //print("Router Check (Sync): Claim 'groups' nullo in appMetadata per ${user.email}.");
-    return false;
-  }
+    final dynamic response = await _supabase.rpc(
+      'current_user_is_in_group',
+      params: {'group_name_param': superAdminGroupName},
+    );
 
-  if (groupsClaim is List) {
-    try {
-      // Assicura che gli elementi siano stringhe
-      final List<String> userGroups = List<String>.from(groupsClaim.map((item) => item.toString()));
-      // Controlla se il gruppo 'SUPER-ADMIN' è presente (case-sensitive)
-      final bool isAdmin = userGroups.contains('SUPER_ADMIN'); // CAMBIA 'SUPER-ADMIN' SE IL TUO GRUPPO HA UN NOME DIVERSO
-      //print("Router Check (Sync): Utente ${user.email}, Gruppi (da claim): $userGroups, È Super Admin: $isAdmin");
+    // La tua funzione SQL 'current_user_is_in_group' restituisce un booleano.
+    // Il client Supabase Dart per RPC lo restituirà direttamente come bool.
+    if (response is bool) {
+      final bool isAdmin = response;
+      print("[AppRouter] checkCurrentUserIsSuperAdmin: Risultato RPC (boolean): $isAdmin");
       return isAdmin;
-    } catch (e) {
-      //print("Router Check (Sync): Errore durante la conversione dei gruppi da claim per ${user.email}: $e");
-      return false;
+    } else {
+      print("[AppRouter] checkCurrentUserIsSuperAdmin: Risposta RPC non è booleana, tipo: ${response.runtimeType}, Data: $response. Considerato non admin.");
+      return false; // In caso di risposta inattesa, assumi non admin per sicurezza
     }
-  } else {
-    //print("Router Check (Sync): Claim 'groups' per ${user.email} non è una lista, tipo: ${groupsClaim.runtimeType}");
-    return false;
+  } catch (e) {
+    print("[AppRouter] checkCurrentUserIsSuperAdmin: Errore durante chiamata RPC: $e");
+    return false; // In caso di errore, assumi non admin
   }
 }
 
 class GoRouterRefreshStream extends ChangeNotifier {
-  // ... (codice GoRouterRefreshStream invariato) ...
   late final StreamSubscription<AuthState> _subscription;
   bool _isDisposed = false;
 
@@ -57,25 +58,15 @@ class GoRouterRefreshStream extends ChangeNotifier {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_isDisposed) notifyListeners();
     });
-
     _subscription = stream.asBroadcastStream().listen((AuthState data) {
-      //print("[GoRouterRefreshStream] Auth state changed: ${data.event}");
-      if (!_isDisposed) {
-        notifyListeners();
-      }
+      if (!_isDisposed) notifyListeners();
     }, onError: (error) {
-      //print("[GoRouterRefreshStream] Error in auth stream: $error");
-      if (!_isDisposed) {
-        notifyListeners();
-      }
+      if (!_isDisposed) notifyListeners();
     });
-    //print("[GoRouterRefreshStream] Listener auth state creato.");
   }
-
   @override
   void dispose() {
     if (!_isDisposed) {
-      //print("[GoRouterRefreshStream] Disposing listener auth state.");
       _isDisposed = true;
       _subscription.cancel();
       super.dispose();
@@ -86,7 +77,7 @@ class GoRouterRefreshStream extends ChangeNotifier {
 class AppRouter {
   static final router = GoRouter(
     initialLocation: '/',
-    refreshListenable: GoRouterRefreshStream(Supabase.instance.client.auth.onAuthStateChange),
+    refreshListenable: GoRouterRefreshStream(_supabase.auth.onAuthStateChange),
     routes: [
       GoRoute(
         path: '/',
@@ -110,7 +101,7 @@ class AppRouter {
           child: Center(child: Text('Contenuto principale Home')),
         ),
         redirect: (context, state) {
-          final user = Supabase.instance.client.auth.currentUser;
+          final user = _supabase.auth.currentUser;
           final passwordSet = user?.userMetadata?['has_set_password'] == true;
           if (user != null && !passwordSet) {
             return '/set-password';
@@ -130,92 +121,69 @@ class AppRouter {
           screenName: 'Database',
           child: DatabaseScreen(),
         ),
-        // *** REDIRECT SPECIFICO PER /database PER CONTROLLO RUOLO ***
-        redirect: (context, state) {
-          final user = Supabase.instance.client.auth.currentUser;
+        redirect: (context, state) async {
+          final user = _supabase.auth.currentUser; // Utile per i controlli iniziali
           final bool loggedIn = user != null;
           final bool passwordSet = user?.userMetadata?['has_set_password'] == true;
 
-          // 1. Prima controlla se è loggato e password impostata (come prima)
           if (!loggedIn) {
-            //print('[GoRouter Redirect /database] Not logged in. Redirecting to /login.');
-            return '/login'; // Reindirizza a login se non loggato
+            return '/login';
           }
           if (!passwordSet) {
-            //print('[GoRouter Redirect /database] Logged in, password not set. Redirecting to /set-password.');
-            return '/set-password'; // Reindirizza se la password non è impostata
+            return '/set-password';
           }
 
-          // 2. Se loggato e password impostata, controlla il ruolo
-          if (!_isUserSuperAdminSync(user)) {
-            //print('[GoRouter Redirect /database] User is not admin. Redirecting to /unauthorized.');
+          // Chiama la funzione async per verificare il ruolo
+          if (!await checkCurrentUserIsSuperAdmin()) {
+            // Non serve più passare 'user'
+            print('[GoRouter Redirect /database] L_utente non è Super Admin (da RPC current_user_is_in_group). Redirect a /unauthorized.');
             return '/unauthorized';
           }
-          // Se tutti i controlli passano, permette l'accesso
+          print('[GoRouter Redirect /database] L_utente è Super Admin (da RPC current_user_is_in_group). Accesso consentito.');
           return null;
         },
       ),
-      // *** AGGIUNTA ROUTE PER ACCESSO NEGATO ***
       GoRoute(
         path: '/unauthorized',
         name: 'unauthorized',
         builder: (context, state) => const UnauthorizedScreen(),
       ),
     ],
-    // --- LOGICA DI REDIRECT GLOBALE ---
-    // Il redirect globale ora si concentra sull'autenticazione generale e sul flusso di impostazione password.
-    // I controlli di ruolo specifici sono gestiti nei redirect delle singole route.
+    // --- LOGICA DI REDIRECT GLOBALE (SINCRONA) ---
     redirect: (BuildContext context, GoRouterState state) {
-      final supabaseClient = Supabase.instance.client;
-      final user = supabaseClient.auth.currentUser;
-      final session = supabaseClient.auth.currentSession;
+      final user = _supabase.auth.currentUser;
+      final session = _supabase.auth.currentSession;
       final bool loggedIn = session != null;
       final bool passwordSet = user?.userMetadata?['has_set_password'] == true;
       final String currentMatchedLocation = state.matchedLocation;
 
-      //print('[GoRouter Global Redirect] Path: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet, isAdmin: ${_isUserSuperAdminSync(user)}');
+      // print('[GoRouter Global Redirect] Path: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet');
 
-      final isPublicRoute = (currentMatchedLocation == '/login' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/' || currentMatchedLocation == '/unauthorized'); // Anche unauthorized è pubblica
+      final isPublicRoute = (currentMatchedLocation == '/login' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/' || currentMatchedLocation == '/unauthorized');
 
-      // CASO 1: Utente Loggato
       if (loggedIn) {
-        // 1a: Loggato, ma password non impostata
         if (!passwordSet && currentMatchedLocation != '/set-password') {
-          //print('[GoRouter Global Redirect] Logged in, password required. Redirecting to /set-password.');
           return '/set-password';
         }
-        // 1b: Loggato, password impostata, ma su /login, /splash, o /set-password (non dovrebbe essere lì)
         if (passwordSet && (currentMatchedLocation == '/login' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/set-password' || currentMatchedLocation == '/')) {
-          // Eccezione: se sta andando a /database E NON è admin, il redirect di /database lo manderà a /unauthorized.
-          // Non vogliamo che questo redirect globale lo mandi di nuovo a /home.
-          if (currentMatchedLocation == '/database' && !_isUserSuperAdminSync(user)) {
-            return null; // Lascia che il redirect di /database gestisca
+          if (currentMatchedLocation == '/database') {
+            return null;
           }
-          //print('[GoRouter Global Redirect] Logged in & PwdSet. Redirecting from $currentMatchedLocation to /home.');
-          return '/home';
+          if (currentMatchedLocation != '/unauthorized') {
+            return '/home';
+          }
         }
-        // Per la rotta /database, il suo redirect specifico ha già gestito il ruolo.
-        // Se l'utente è admin e va a /database, il redirect di /database ritorna null,
-        // quindi questo redirect globale non dovrebbe interferire.
-        // Se l'utente NON è admin e va a /database, il redirect di /database lo manda a /unauthorized.
-        // Questo redirect globale non dovrebbe rimandarlo a /home se è su /unauthorized.
-
-        //print('[GoRouter Global Redirect] Logged in. Allowing navigation to $currentMatchedLocation.');
         return null;
-      }
-      // CASO 2: Utente NON Loggato
-      else {
+      } else {
+        // Non Loggato
         if (!isPublicRoute) {
-          //print('[GoRouter Global Redirect] Not logged in. Redirecting to /login from protected route $currentMatchedLocation.');
           return '/login';
         }
-        //print('[GoRouter Global Redirect] Not logged in. Allowing navigation to public route $currentMatchedLocation.');
         return null;
       }
     },
     errorBuilder: (context, state) {
-      // ... (errorBuilder invariato) ...
-      //print('[GoRouter Error] Path: ${state.uri}, Error: ${state.error}');
+      /* ... invariato ... */
       return Scaffold(
         appBar: AppBar(title: const Text('Errore Navigazione')),
         body: Center(

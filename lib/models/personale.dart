@@ -6,11 +6,11 @@ import 'dart:convert';
 
 class Personale {
   final String uuid;
-  final String ente;
+  String ente;
   final int id; // Questo 'id' è specifico dell'ente, non l'UUID primario
   final String cognome;
   final String nome;
-  final String struttura; // Questo 'struttura' è l'ID della struttura all'interno dell'ente
+  String struttura; // Questo 'struttura' è l'ID della struttura all'interno dell'ente
   final String emailPrincipale;
   String? photoUrl;
   final String? cv;
