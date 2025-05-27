@@ -106,27 +106,6 @@ class _HomeScreenState extends State<HomeScreen> {
             // Pass the current user data to the editing widget
             child: PersonaleProfile(initialPersonale: currentUser),
           ),
-          // Actions might be needed if PersonaleProfile doesn't have its own save/cancel
-          /**
-            actions: <Widget>[
-              TextButton(
-                child: const Text('Annulla'),
-                onPressed: () => Navigator.of(dialogContext).pop(),
-              ),
-              // Add a Save button here if PersonaleProfile doesn't handle saving itself
-              TextButton(
-                child: const Text('Salva'),
-                onPressed: () {
-                  print("Salvataggio profilo...");
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Salvo ....'), backgroundColor: Colors.green),
-                  );
-                  Navigator.of(dialogContext).pop();
-                },
-              ),
-            ],
-
-  **/
         );
       },
     );
@@ -149,84 +128,68 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // --- Helper function to generate the Supabase signed URL ---
-  Future<String?> _getSignedAvatarUrl(Personale personale) async {
-    // Adjust field names to match your Personale model exactly
-    final ente = personale.ente;
-    final id = personale.id;
+  Future<String?> _getSignedAvatarUrl(Personale currentUser) async {
+    // Se currentUser.photoUrl è null o vuoto, procedi a generare la signed URL.
+    // Altrimenti, usa il photoUrl esistente (che potrebbe essere un fallback o una URL già funzionante)
+    if (currentUser.photoUrl != null && currentUser.photoUrl!.isNotEmpty) {
+      //print("HomeScreen - _getSignedAvatarUrl: Using existing photoUrl: ${currentUser.photoUrl}");
+      return currentUser.photoUrl; // Restituisci la URL esistente
+    }
 
-    // Validate necessary data for path construction
+    //print('HomeScreen: _getSignedAvatarUrl: Generazione URL firmato per l'avatar di ${currentUser.nome} ${currentUser.cognome} (${currentUser.id})');
+    // ... resto della logica per generare la signed URL ...
+    final ente = currentUser.ente;
+    final id = currentUser.id;
+
     if (ente.isEmpty || id <= 0) {
-      print("Dati insufficienti per generare il percorso Supabase (ente o id mancanti).");
+      //print("HomeScreen - _getSignedAvatarUrl: Dati insufficienti (ente o id mancanti).");
       return null;
     }
 
-    // Construct the storage path EXACTLY matching your bucket structure
-    final String imagePath = 'personale/foto/${ente}_$id.jpg'; // Example: 'personale/foto/UNIBO_36941.jpg'
-    const String bucketName = 'una-bucket'; // Your bucket name
-    const int expiresIn = 3600; // Signed URL validity duration (seconds)
-
+    final String imagePath = 'personale/foto/${ente}_$id.jpg';
+    const String bucketName = 'una-bucket';
+    const int expiresIn = 86400 * 365 * 50; // token temporaneo di 50 anni (in secondi) !!!!
     try {
-      //print("Tentativo di generare Signed URL per: $imagePath");
       final supabase = Supabase.instance.client;
-
-      // Optional: Check if the file actually exists before generating the URL
-      // This prevents generating URLs for non-existent files but adds latency.
-      // try {
-      //   await supabase.storage.from(bucketName).getMetadata(imagePath);
-      // } catch (e) {
-      //   print("File $imagePath non trovato in $bucketName ($e). Salto generazione Signed URL.");
-      //   return null; // File doesn't exist, don't proceed
-      // }
-
-      // Generate the signed URL
       final signedUrl = await supabase.storage.from(bucketName).createSignedUrl(imagePath, expiresIn);
-
-      //print("Signed URL generato: $signedUrl");
+      //print("HomeScreen - _getSignedAvatarUrl: URL firmato generato: $signedUrl");
+      // NON aggiornare currentUser.photoUrl qui con la signed URL temporanea.
       return signedUrl;
     } on StorageException catch (e) {
-      // Catch specific Supabase storage errors
-      print("StorageException durante createSignedUrl per $imagePath: ${e.message} (StatusCode: ${e.statusCode})");
-      // Handle common errors like object not found (404/400) or access denied (403)
-      // if (e.statusCode == '404' || e.statusCode == '400') { ... }
-      return null;
+      // Questa eccezione avviene se createSignedUrl stesso fallisce (es. bucket non trovato, o a volte per oggetto non trovato)
+      print("HomeScreen - _getSignedAvatarUrl: StorageException durante createSignedUrl per $imagePath: ${e.message} (StatusCode: ${e.statusCode})");
+      return null; // Indica che la generazione della URL è fallita
     } catch (e, stackTrace) {
-      // Catch any other unexpected errors
-      print("Errore imprevisto durante createSignedUrl per $imagePath: $e\nStackTrace: $stackTrace");
+      print("HomeScreen - _getSignedAvatarUrl: Errore imprevisto durante createSignedUrl per $imagePath: $e\nStackTrace: $stackTrace");
       return null;
     }
   }
 
   // --- Widget to build the avatar from a given URL (signed or fallback) ---
   Widget _buildAvatarFromUrl(BuildContext context, String url, bool isSignedUrlAttempt, Personale personale) {
-    // Validate the URL before attempting to load
     final bool hasValidUrl = Uri.tryParse(url)?.hasAbsolutePath ?? false;
 
+    // AGGIUNTA LOG
+    print("HomeScreen - _buildAvatarFromUrl: Attempting to load. Valid URL: $hasValidUrl, isSignedUrlAttempt: $isSignedUrlAttempt, URL: $url");
+
     if (!hasValidUrl) {
-      print("URL non valido fornito a _buildAvatarFromUrl: $url");
-      // If the current URL is invalid, determine next step
-      return isSignedUrlAttempt
-          ? _buildAvatarFromFallback(context, personale) // If signed URL was bad, try fallback
-          : _buildDefaultAvatar(context, "URL fallback non valido"); // If fallback was also bad, show default
+      print("HomeScreen - _buildAvatarFromUrl: URL non valido fornito: $url");
+      return isSignedUrlAttempt ? _buildAvatarFromFallback(context, personale) : _buildDefaultAvatar(context, "URL fallback non valido ($url)");
     }
 
-    //print("Visualizzazione immagine da URL ${isSignedUrlAttempt ? 'firmato' : 'fallback'}: $url");
-
     return CircleAvatar(
-      radius: 18, // Matches desired size
-      backgroundColor: Theme.of(context).colorScheme.surfaceVariant, // Placeholder bg
+      radius: 18,
+      backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
       child: ClipOval(
-        // Ensures the image is clipped to a circle
         child: Image.network(
           url,
-          key: ValueKey(url), // Important for updating image if URL changes
-          width: 36, // Double the radius
+          key: ValueKey(url),
+          width: 36,
           height: 36,
           fit: BoxFit.fill,
-          // Shows loading progress
           loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child; // Image loaded, show it
+            if (loadingProgress == null) return child;
             return Center(
-              // Show progress indicator while loading
               child: SizedBox(
                 width: 18,
                 height: 18,
@@ -234,17 +197,17 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             );
           },
-          // Handles errors during image loading
           errorBuilder: (context, error, stackTrace) {
-            print("Errore caricamento NetworkImage (${isSignedUrlAttempt ? 'firmato' : 'fallback'} '$url'): $error");
+            // AGGIUNTA LOG
+            print("HomeScreen - _buildAvatarFromUrl - errorBuilder: Error loading. isSignedUrlAttempt: $isSignedUrlAttempt, URL: '$url', Error: $error");
+
             if (isSignedUrlAttempt) {
-              // If loading the SIGNED URL failed, try the fallback URL
-              _showSnackbar(context, "Errore immagine Supabase, uso fallback...", isError: true);
-              return _buildAvatarFromFallback(context, personale); // Return the fallback attempt
+              // Non chiamare _showSnackbar qui per ora, per semplificare il debug
+              // _showSnackbar(context, "Errore immagine Supabase, uso fallback...", isError: true);
+              return _buildAvatarFromFallback(context, personale);
             } else {
-              // If loading the FALLBACK URL also failed, show the default avatar
-              _showSnackbar(context, "Errore immagine fallback, uso icona default.", isError: true);
-              return _buildDefaultAvatar(context, "Errore fallback"); // Return the default icon
+              // _showSnackbar(context, "Errore immagine fallback, uso icona default.", isError: true);
+              return _buildDefaultAvatar(context, "Errore fallback ($url)");
             }
           },
         ),
@@ -258,11 +221,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final bool hasValidFallback = fallbackUrl != null && fallbackUrl.isNotEmpty && (Uri.tryParse(fallbackUrl)?.hasAbsolutePath ?? false);
 
     if (hasValidFallback) {
-      print("Tentativo con URL fallback: $fallbackUrl");
+      //print("Tentativo con URL fallback: $fallbackUrl");
       // Call the main URL builder, indicating it's NOT a signed URL attempt
       return _buildAvatarFromUrl(context, fallbackUrl, false, personale);
     } else {
-      print("Nessun URL fallback valido trovato (${fallbackUrl ?? 'null'}), uso icona default.");
+      //print("Nessun URL fallback valido trovato (${fallbackUrl ?? 'null'}), uso icona default.");
       // No snackbar here, as the previous step might have shown one
       return _buildDefaultAvatar(context, "No fallback"); // Return default if no valid fallback
     }
@@ -270,11 +233,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // --- Widget to build the default placeholder avatar ---
   Widget _buildDefaultAvatar(BuildContext context, String reason) {
-    print("Costruzione avatar default (Motivo: $reason)");
-    // Returns a simple CircleAvatar with an icon
+    // AGGIUNTA LOG
+    print("HomeScreen - _buildDefaultAvatar: Costruzione avatar default. Reason: $reason");
     return CircleAvatar(
       radius: 18,
-      backgroundColor: Theme.of(context).colorScheme.primaryContainer, // Use theme color
+      backgroundColor: Theme.of(context).colorScheme.primaryContainer,
       child: Icon(Icons.person_outline, size: 18, color: Theme.of(context).colorScheme.onPrimaryContainer),
     );
   }
@@ -394,7 +357,7 @@ class _HomeScreenState extends State<HomeScreen> {
             fillColor: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
           ),
           onSubmitted: (value) {
-            print("Search submitted: $value");
+            //print("Search submitted: $value");
           },
         ),
       ),
@@ -545,53 +508,37 @@ class _HomeScreenState extends State<HomeScreen> {
                                 }
                                 break;
                               case ProfileAction.logout:
-                                try {
-                                  AuthHelper.setLogoutReason(LogoutReason.userInitiated);
-                                  print("[HomeScreen] Logout: Inizio signOut...");
-                                  await Supabase.instance.client.auth.signOut();
-                                  print("[HomeScreen] Logout: signOut completato.");
+                                AuthHelper.setLogoutReason(LogoutReason.userInitiated);
+                                //print("[HomeScreen] Logout: Avvio signOut (fire and forget)...");
 
-                                  // Se il widget è ancora montato dopo il signOut, procedi con la navigazione.
-                                  // Il cambiamento di stato dell'autenticazione dovrebbe già aver triggerato GoRouter,
-                                  // quindi questa navigazione manuale potrebbe essere ridondante o addirittura problematica
-                                  // se GoRouter sta già facendo il suo lavoro.
+                                // Chiamiamo signOut() ma non attendiamo (await) il suo completamento qui
+                                // per evitare di mantenere il contesto del PopupMenuButton attivo
+                                // mentre il widget potrebbe essere smontato.
+                                Supabase.instance.client.auth.signOut().then((_) {
+                                  //print("[HomeScreen] Logout: signOut promise completata (successo o fallimento gestito internamente da Supabase/listener).");
+                                  // Non fare nulla qui che dipenda dal context di HomeScreen,
+                                  // perché GoRouter dovrebbe aver già gestito il redirect.
+                                  // Se il widget è ancora montato e si vuole mostrare un messaggio di successo (raro per il logout),
+                                  // bisognerebbe farlo con cautela e controlli 'mounted'.
+                                }).catchError((error, stackTrace) {
+                                  //print("[HomeScreen] Logout: Errore esplicito durante signOut(): $error\nStack: $stackTrace");
+                                  AuthHelper.clearLastLogoutReason(); // Pulisci solo se il signOut stesso fallisce
 
-                                  // IMPORTANTE: GoRouter ascolta onAuthStateChange. Quando signOut() viene completato,
-                                  // onAuthStateChange emette un evento, e il redirect globale di GoRouter
-                                  // dovrebbe già portare a /login.
-                                  // La chiamata esplicita a GoRouter.of(context).go('/login') qui
-                                  // potrebbe essere la fonte del problema se il contesto non è più valido
-                                  // o se entra in conflitto con il redirect automatico di GoRouter.
-
-                                  // Rimuoviamo la navigazione esplicita qui e ci affidiamo al redirect di GoRouter.
-                                  // if (!mounted) {
-                                  //   print("[HomeScreen] Logout: Widget smontato prima della navigazione esplicita.");
-                                  //   return;
+                                  // È rischioso usare 'context' qui perché il widget potrebbe essere smontato.
+                                  // Loggare l'errore è la cosa più sicura.
+                                  // Se si volesse tentare una Snackbar, bisognerebbe farlo con estrema cautela:
+                                  // if (mounted && context.findRenderObject() != null && context.findRenderObject()!.attached) {
+                                  //   if (error is AuthException) {
+                                  //     SnackbarHelper.showErrorSnackbar(context, "Errore logout: ${error.message}");
+                                  //   } else if (!error.toString().contains("Looking up a deactivated widget's ancestor is unsafe")) {
+                                  //     SnackbarHelper.showErrorSnackbar(context, "Errore logout inatteso.");
+                                  //   }
                                   // }
-                                  // print("[HomeScreen] Logout: Tento navigazione esplicita a /login.");
-                                  // GoRouter.of(context).go('/login'); // PROVA A RIMUOVERE QUESTA RIGA
+                                });
 
-                                  // Se la rimozione della navigazione esplicita non risolve,
-                                  // e l'errore persiste, potrebbe essere legato allo smontaggio del PopupMenuButton
-                                  // stesso, indipendentemente dalla navigazione esplicita.
-                                } on AuthException catch (ae, s) {
-                                  // Cattura specificamente AuthException
-                                  AuthHelper.clearLastLogoutReason(); // Pulisci solo se il signOut fallisce
-                                  print("[HomeScreen] Logout: AuthException: $ae\nStack: $s");
-                                  if (!mounted) return;
-                                  SnackbarHelper.showErrorSnackbar(context, "Errore logout: ${ae.message}");
-                                } catch (e, s) {
-                                  // Cattura altre eccezioni
-                                  // Non pulire AuthHelper qui, l'errore potrebbe essere quello "unsafe"
-                                  print("[HomeScreen] Logout: Errore generico: $e\nStack: $s");
-                                  if (!mounted) return;
-                                  // Non mostrare una snackbar per l'errore "unsafe", è un problema di framework/stato.
-                                  if (e.toString().contains("Looking up a deactivated widget's ancestor is unsafe")) {
-                                    // Non fare nulla, l'errore è già stato loggato dalla libreria widgets
-                                  } else {
-                                    SnackbarHelper.showErrorSnackbar(context, "Errore logout inatteso.");
-                                  }
-                                }
+                                // A questo punto, il PopupMenuButton si chiuderà normalmente.
+                                // L'evento onAuthStateChange (ascoltato da GoRouter e dal PersonaleController)
+                                // si occuperà della navigazione e della pulizia dello stato.
                                 break;
                               case ProfileAction.version:
                                 _showVersionDialog(context, ctrl.appVersion.value); // Show version dialog

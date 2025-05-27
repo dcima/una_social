@@ -68,7 +68,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
       }
     } catch (e) {
       final String errorMsg = "Errore in lettura tabelle: ${e.toString()}";
-      print(errorMsg); // Logga l'errore completo
+      //print(errorMsg); // Logga l'errore completo
       if (!mounted) return;
 
       setState(() {
@@ -161,9 +161,9 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
 
       if (!mounted) return;
       SnackbarHelper.showSuccessSnackbar(context, '"$tableName" esportato con successo come $fileName!');
-    } catch (e, stackTrace) {
+    } catch (e) {
       final String errorMsg = 'Errore durante l\'esportazione di "$tableName": ${e.toString()}';
-      print("$errorMsg\nStackTrace: $stackTrace");
+      //print("$errorMsg\nStackTrace: $stackTrace");
       if (!mounted) return;
       SnackbarHelper.showErrorSnackbar(context, errorMsg);
     }
@@ -278,7 +278,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
               ),
               onTap: () {
                 // Potresti aggiungere un'azione qui, tipo navigare a una vista dettagliata della tabella
-                print("Selezionata tabella: $tableName");
+                //print("Selezionata tabella: $tableName");
                 SnackbarHelper.showInfoSnackbar(context, "Selezionata tabella: $tableName. Usa il menu per esportare.");
               },
             ),

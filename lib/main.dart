@@ -19,7 +19,7 @@ const String supabaseAnonKeyEnvKey = 'SUPABASE_ANON_KEY';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   setUrlStrategy(PathUrlStrategy());
-  print("URL Strategy impostata su Path.");
+  ////print("URL Strategy impostata su Path.");
 
   const String supabaseUrl = String.fromEnvironment(supabaseUrlEnvKey, defaultValue: '');
   const String supabaseAnonKey = String.fromEnvironment(supabaseAnonKeyEnvKey, defaultValue: '');
@@ -33,15 +33,15 @@ Future<void> main() async {
       errorMessage += "$supabaseAnonKeyEnvKey non trovata o vuota. ";
     }
     errorMessage += "Assicurati che siano definite con --dart-define.";
-    print(errorMessage);
+    //print(errorMessage);
     runApp(SupabaseErrorApp(error: errorMessage));
     return;
   }
 
-  print("Supabase URL (da --dart-define): $supabaseUrl");
+  ////print("Supabase URL (da --dart-define): $supabaseUrl");
 
   try {
-    print("Inizializzazione Supabase...");
+    //print("Inizializzazione Supabase...");
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
@@ -50,14 +50,14 @@ Future<void> main() async {
       ),
       debug: true,
     );
-    print("Supabase inizializzato.");
+    //print("Supabase inizializzato.");
 
-    print("Impostazione listener onAuthStateChange...");
+    //print("Impostazione listener onAuthStateChange...");
     Supabase.instance.client.auth.onAuthStateChange.listen(
       (data) {
         final AuthChangeEvent event = data.event;
         final Session? session = data.session;
-        print('[MAIN AUTH LISTENER] Evento Ricevuto: $event, Sessione: ${session != null ? "Presente (User ID: ${session.user.id})" : "Assente"}');
+        //print('[MAIN AUTH LISTENER] Evento Ricevuto: $event, Sessione: ${session != null ? "Presente (User ID: ${session.user.id})" : "Assente"}');
 
         // Se l'evento NON è signedOut, e la ragione era invalidRefreshToken,
         // la "crisi" è passata (es. l'utente si è riloggato), quindi resettiamo.
@@ -69,10 +69,10 @@ Future<void> main() async {
         switch (event) {
           case AuthChangeEvent.initialSession:
             if (session != null && !session.isExpired) {
-              print('[MAIN AUTH LISTENER] initialSession: Utente valido. Notifier -> authenticated.');
+              //print('[MAIN AUTH LISTENER] initialSession: Utente valido. Notifier -> authenticated.');
               appAuthStatusNotifier.value = AuthStatus.authenticated;
             } else {
-              print('[MAIN AUTH LISTENER] initialSession: Nessun utente valido. Notifier -> unauthenticated.');
+              //print('[MAIN AUTH LISTENER] initialSession: Nessun utente valido. Notifier -> unauthenticated.');
               // Se la sessione iniziale non è valida e la ragione era già invalidRefreshToken (da un errore precedente),
               // non la sovrascriviamo con 'none', lasciamo che la LoginScreen la gestisca.
               if (AuthHelper.lastLogoutReason != LogoutReason.invalidRefreshToken) {
@@ -86,7 +86,7 @@ Future<void> main() async {
           case AuthChangeEvent.mfaChallengeVerified:
           case AuthChangeEvent.userUpdated:
             if (appAuthStatusNotifier.value != AuthStatus.authenticated) {
-              print('[MAIN AUTH LISTENER] Evento $event: Stato Loggato. Notifier -> authenticated.');
+              //print('[MAIN AUTH LISTENER] Evento $event: Stato Loggato. Notifier -> authenticated.');
               appAuthStatusNotifier.value = AuthStatus.authenticated;
             }
             // Se l'utente si logga con successo, qualsiasi ragione di logout precedente è irrilevante
@@ -95,7 +95,7 @@ Future<void> main() async {
           case AuthChangeEvent.signedOut:
           case AuthChangeEvent.userDeleted:
             if (appAuthStatusNotifier.value != AuthStatus.unauthenticated) {
-              print('[MAIN AUTH LISTENER] Evento $event: Stato Sloggato. Notifier -> unauthenticated.');
+              //print('[MAIN AUTH LISTENER] Evento $event: Stato Sloggato. Notifier -> unauthenticated.');
               appAuthStatusNotifier.value = AuthStatus.unauthenticated;
             }
             // NON pulire la ragione qui, potrebbe essere stata impostata dall'onError.
@@ -104,33 +104,33 @@ Future<void> main() async {
             // Se l'utente si è disconnesso esplicitamente, la HomeScreen dovrebbe aver impostato UserInitiated.
             break;
           case AuthChangeEvent.passwordRecovery:
-            print('[MAIN AUTH LISTENER] Gestito evento passwordRecovery. Stato auth non modificato.');
+            //print('[MAIN AUTH LISTENER] Gestito evento passwordRecovery. Stato auth non modificato.');
             break;
         }
       },
       onError: (error) {
-        print('[MAIN AUTH LISTENER] Errore nello stream onAuthStateChange: $error');
+        //print('[MAIN AUTH LISTENER] Errore nello stream onAuthStateChange: $error');
         if (error is AuthException && (error.statusCode == '400' || error.message.toLowerCase().contains('invalid refresh token'))) {
-          print('[MAIN AUTH LISTENER] Causa logout specifica: Invalid Refresh Token.');
+          //print('[MAIN AUTH LISTENER] Causa logout specifica: Invalid Refresh Token.');
           AuthHelper.setLogoutReason(LogoutReason.invalidRefreshToken);
         }
         // Altrimenti, non impostiamo una ragione specifica qui, ma trattiamo l'errore come un potenziale logout
         if (appAuthStatusNotifier.value != AuthStatus.unauthenticated) {
-          print('[MAIN AUTH LISTENER] Errore stream: Notifier -> unauthenticated.');
+          //print('[MAIN AUTH LISTENER] Errore stream: Notifier -> unauthenticated.');
           appAuthStatusNotifier.value = AuthStatus.unauthenticated;
         }
       },
     );
-    print("Listener onAuthStateChange impostato.");
-  } catch (e, stackTrace) {
-    print("ERRORE CRITICO init Supabase: $e");
-    print("Stack trace: $stackTrace");
+    //print("Listener onAuthStateChange impostato.");
+  } catch (e) {
+    //print("ERRORE CRITICO init Supabase: $e");
+    //print("Stack trace: $stackTrace");
     appAuthStatusNotifier.value = AuthStatus.unauthenticated;
     runApp(SupabaseErrorApp(error: "Errore inizializzazione Supabase: ${e.toString()}"));
     return;
   }
 
-  print("Avvio MyApp...");
+  //print("Avvio MyApp...");
   runApp(const MyApp());
 }
 

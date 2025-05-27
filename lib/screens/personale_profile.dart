@@ -27,7 +27,7 @@ class ContactEntryItem {
   }
 
   void dispose() {
-    // print('ContactEntryItem.dispose(): key ${uniqueKey.toString()}');
+    // //print('ContactEntryItem.dispose(): key ${uniqueKey.toString()}');
     tagController.dispose();
     valueController.dispose();
   }
@@ -43,7 +43,7 @@ class RuoloEntryItem {
   String get text => controller.text.trim();
 
   void dispose() {
-    // print('RuoloEntryItem.dispose(): key ${uniqueKey.toString()}');
+    // //print('RuoloEntryItem.dispose(): key ${uniqueKey.toString()}');
     controller.dispose();
   }
 }
@@ -93,7 +93,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
   @override
   void initState() {
-    print('_PersonaleProfileState.initState: Loading profile for ${widget.initialPersonale.fullName} (ID: ${widget.initialPersonale.id})');
+    //print('_PersonaleProfileState.initState: Loading profile for ${widget.initialPersonale.fullName} (ID: ${widget.initialPersonale.id})');
     super.initState();
     _initializeControllers();
     _initializeDynamicLists();
@@ -103,7 +103,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _initializeControllers() {
-    print('_PersonaleProfileState._initializeControllers');
+    //print('_PersonaleProfileState._initializeControllers');
     _enteController = TextEditingController(text: widget.initialPersonale.ente);
     _strutturaController = TextEditingController(text: widget.initialPersonale.struttura);
     _emailPrincipaleController = TextEditingController(text: widget.initialPersonale.emailPrincipale);
@@ -117,14 +117,14 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _initializeDynamicLists() {
-    print('_PersonaleProfileState._initializeDynamicLists');
+    //print('_PersonaleProfileState._initializeDynamicLists');
     _ruoliEntries.clear();
     if (widget.initialPersonale.ruoli != null) {
       for (var ruoloText in widget.initialPersonale.ruoli!) {
         _ruoliEntries.add(RuoloEntryItem(testo: ruoloText));
       }
     }
-    print('  Ruoli init: ${_ruoliEntries.length}');
+    //print('  Ruoli init: ${_ruoliEntries.length}');
 
     _altreEmailEntries.clear();
     if (widget.initialPersonale.altreEmails != null) {
@@ -132,7 +132,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
         _altreEmailEntries.add(ContactEntryItem(t: emailMap['t'] ?? '', v: emailMap['v'] ?? ''));
       }
     }
-    print('  AltreEmailEntries init: ${_altreEmailEntries.length}');
+    //print('  AltreEmailEntries init: ${_altreEmailEntries.length}');
 
     _phoneEntries.clear();
     if (widget.initialPersonale.telefoni != null) {
@@ -140,7 +140,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
         _phoneEntries.add(ContactEntryItem(t: phoneMap['t'] ?? '', v: phoneMap['v'] ?? ''));
       }
     }
-    print('  PhoneEntries init: ${_phoneEntries.length}');
+    //print('  PhoneEntries init: ${_phoneEntries.length}');
   }
 
   void _addListenersToStaticControllers() {
@@ -152,7 +152,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
   // Aggiunge listener alle entry già presenti nelle liste
   void _addListenersToDynamicEntries() {
-    print('_PersonaleProfileState._addListenersToDynamicEntries');
+    //print('_PersonaleProfileState._addListenersToDynamicEntries');
     for (var entry in _ruoliEntries) {
       entry.controller.removeListener(_markDirty); // Rimuovi vecchio se presente
       entry.controller.addListener(_markDirty);
@@ -173,7 +173,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
   @override
   void dispose() {
-    print('_PersonaleProfileState.dispose: Disposing controllers for ${widget.initialPersonale.fullName}');
+    //print('_PersonaleProfileState.dispose: Disposing controllers for ${widget.initialPersonale.fullName}');
     final staticControllers = [_enteController, _strutturaController, _emailPrincipaleController, _nomeController, _cognomeController, _photoUrlController, _cvController, _noteBiograficheController, _rssController, _webController];
     for (var controller in staticControllers) {
       controller.removeListener(_markDirty);
@@ -206,22 +206,30 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   Future<void> _fetchDisplayImageUrl() async {
-    print('_PersonaleProfileState._fetchDisplayImageUrl for ${_photoUrlController.text}');
-    if (!mounted) return;
+    //print('_PersonaleProfileState._fetchDisplayImageUrl');
 
-    // Imposta isLoadingDisplayImageUrl a true solo se stiamo per fare un fetch
-    // o se non abbiamo ancora un URL valido.
-    // Se _currentDisplayImageUrl è già settato (es. da onChanged del TextFormField),
-    // non vogliamo mostrare il loader globale, ma il loader di Image.network.
+    if (!mounted) {
+      return;
+    }
 
+    String photoUrl = widget.initialPersonale.photoUrl ?? '';
     String urlInController = _photoUrlController.text.trim();
     bool isControllerUrlValid = Uri.tryParse(urlInController)?.hasAbsolutePath == true;
 
-    if (isControllerUrlValid) {
+    if (photoUrl != '') {
+      //print('Using signedPhotoUrl: $photoUrl');
+      if (mounted) {
+        setState(() {
+          _currentDisplayImageUrl = photoUrl;
+          _isLoadingDisplayImageUrl = false; // Finito il loading dell'URL, ora tocca a Image.network
+          _displayImageFailedToLoad = false; // Resetta il flag di errore per il nuovo URL
+        });
+      }
+    } else if (isControllerUrlValid) {
       // L'URL nel controller è già un URL assoluto, usiamolo direttamente.
       // Image.network gestirà il suo loading.
       if (_currentDisplayImageUrl != urlInController || _displayImageFailedToLoad) {
-        print('  Using direct URL from controller: $urlInController');
+        //print('  Using direct URL from controller: $urlInController');
         if (mounted) {
           setState(() {
             _currentDisplayImageUrl = urlInController;
@@ -237,55 +245,10 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
       }
       return;
     }
-
-    // Se l'URL nel controller non è valido, o è vuoto, proviamo a generare un signed URL.
-    // Ora mostriamo il loader globale.
-    if (mounted) {
-      setState(() {
-        _isLoadingDisplayImageUrl = true;
-        _displayImageFailedToLoad = false;
-      });
-    }
-
-    final ente = widget.initialPersonale.ente;
-    final id = widget.initialPersonale.id;
-
-    if (ente.isNotEmpty && id > 0) {
-      final String objectPath = '$_baseFolderPath/${ente}_$id.jpg';
-      try {
-        print('  Fetching signed URL for: $objectPath');
-        final String signedUrl = await _supabase.storage.from(_bucketName).createSignedUrl(objectPath, 3600);
-        if (mounted) {
-          setState(() {
-            _currentDisplayImageUrl = signedUrl;
-            _isLoadingDisplayImageUrl = false;
-            // _displayImageFailedToLoad è già false
-          });
-        }
-      } catch (e) {
-        print('  Error generating Signed URL for $objectPath: $e');
-        if (mounted) {
-          setState(() {
-            _currentDisplayImageUrl = null; // Nessun URL valido
-            _isLoadingDisplayImageUrl = false;
-            _displayImageFailedToLoad = true; // Errore nel fetch del signed URL
-          });
-        }
-      }
-    } else {
-      print('  Cannot fetch signed URL, ente or id missing/invalid and no valid direct URL.');
-      if (mounted) {
-        setState(() {
-          _currentDisplayImageUrl = null;
-          _isLoadingDisplayImageUrl = false;
-          // _displayImageFailedToLoad rimane false se non c'era proprio modo di provare
-        });
-      }
-    }
   }
 
   void _addRuoloEntry() {
-    print('_PersonaleProfileState._addRuoloEntry');
+    //print('_PersonaleProfileState._addRuoloEntry');
     setState(() {
       final newEntry = RuoloEntryItem();
       newEntry.controller.addListener(_markDirty);
@@ -295,7 +258,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _removeRuoloEntry(RuoloEntryItem entry) {
-    print('_PersonaleProfileState._removeRuoloEntry: key ${entry.uniqueKey}');
+    //print('_PersonaleProfileState._removeRuoloEntry: key ${entry.uniqueKey}');
     setState(() {
       entry.controller.removeListener(_markDirty);
       entry.dispose();
@@ -305,7 +268,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _addAltraEmailEntry() {
-    print('_PersonaleProfileState._addAltraEmailEntry');
+    //print('_PersonaleProfileState._addAltraEmailEntry');
     setState(() {
       final newEntry = ContactEntryItem(t: '', v: '');
       newEntry.tagController.addListener(_markDirty);
@@ -316,7 +279,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _removeAltraEmailEntry(ContactEntryItem entry) {
-    print('_PersonaleProfileState._removeAltraEmailEntry: key ${entry.uniqueKey}');
+    //print('_PersonaleProfileState._removeAltraEmailEntry: key ${entry.uniqueKey}');
     setState(() {
       entry.tagController.removeListener(_markDirty);
       entry.valueController.removeListener(_markDirty);
@@ -327,7 +290,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _addPhoneEntry() {
-    print('_PersonaleProfileState._addPhoneEntry');
+    //print('_PersonaleProfileState._addPhoneEntry');
     setState(() {
       final newEntry = ContactEntryItem(t: '', v: '');
       newEntry.tagController.addListener(_markDirty);
@@ -338,7 +301,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   void _removePhoneEntry(ContactEntryItem entry) {
-    print('_PersonaleProfileState._removePhoneEntry: key ${entry.uniqueKey}');
+    //print('_PersonaleProfileState._removePhoneEntry: key ${entry.uniqueKey}');
     setState(() {
       entry.tagController.removeListener(_markDirty);
       entry.valueController.removeListener(_markDirty);
@@ -349,7 +312,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   Future<void> _pickAndUploadImage() async {
-    print('_PersonaleProfileState._pickAndUploadImage');
+    //print('_PersonaleProfileState._pickAndUploadImage');
     if (_isLoading) return;
     setState(() => _isLoading = true);
     _pickedImageFile = null;
@@ -366,7 +329,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
       final String fileName = '${widget.initialPersonale.ente}_${widget.initialPersonale.id}.jpg';
       final String filePath = '$_baseFolderPath/$fileName';
 
-      print('  Uploading image to: $filePath');
+      //print('  Uploading image to: $filePath');
       await _supabase.storage.from(_bucketName).uploadBinary(
             filePath,
             imageBytes,
@@ -376,7 +339,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
       // Ottieni un URL pubblico con timestamp per forzare l'aggiornamento della cache
       final String publicUrl = _supabase.storage.from(_bucketName).getPublicUrl(filePath);
       final String urlWithTimestamp = "$publicUrl?t=${DateTime.now().millisecondsSinceEpoch}";
-      print('  Image uploaded, new URL with timestamp: $urlWithTimestamp');
+      //print('  Image uploaded, new URL with timestamp: $urlWithTimestamp');
 
       if (mounted) {
         _photoUrlController.text = urlWithTimestamp; // Aggiorna il controller del TextFormField
@@ -393,7 +356,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
       }
       _pickedImageFile = null;
     } catch (e) {
-      print('  Error uploading image: $e');
+      //print('  Error uploading image: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Errore caricamento immagine: $e'), backgroundColor: Colors.red),
@@ -405,9 +368,9 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   }
 
   Future<void> _updateProfile() async {
-    print('_PersonaleProfileState._updateProfile');
+    //print('_PersonaleProfileState._updateProfile');
     if (!_formKey.currentState!.validate()) {
-      print('  Form validation failed.');
+      //print('  Form validation failed.');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Per favore, correggi gli errori nel modulo.'), backgroundColor: Colors.orange),
       );
@@ -444,8 +407,8 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
       'telefoni': updatedPhones.isNotEmpty ? updatedPhones : null,
     };
 
-    print('  Data to update (altre_emails): $updatedAltreEmails');
-    print('  Data to update (telefoni): $updatedPhones');
+    //print('  Data to update (altre_emails): $updatedAltreEmails');
+    //print('  Data to update (telefoni): $updatedPhones');
 
     try {
       await _supabase.from('personale').update(updateData).eq('uuid', widget.initialPersonale.uuid);
@@ -459,7 +422,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
         // Navigator.of(context).pop(); // Togli il commento se vuoi chiudere il dialogo automaticamente
       }
     } catch (e) {
-      print('  Error updating profile: $e');
+      //print('  Error updating profile: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Errore aggiornamento: $e'), backgroundColor: Colors.red),
@@ -555,7 +518,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
   @override
   Widget build(BuildContext context) {
-    print('_PersonaleProfileState.build: AltreEmail count: ${_altreEmailEntries.length}, Phone count: ${_phoneEntries.length}');
+    //print('_PersonaleProfileState.build: AltreEmail count: ${_altreEmailEntries.length}, Phone count: ${_phoneEntries.length}');
 
     Widget photoDisplayWidget;
     const double avatarDisplaySize = 100.0;
@@ -611,7 +574,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
                 );
               },
               errorBuilder: (BuildContext context, Object exception, StackTrace? stackTrace) {
-                print("  Image.network errorBuilder for $_currentDisplayImageUrl: $exception");
+                //print("  Image.network errorBuilder for $_currentDisplayImageUrl: $exception");
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted && !_displayImageFailedToLoad) {
                     // Evita loop di setState

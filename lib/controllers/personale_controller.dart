@@ -29,20 +29,20 @@ class PersonaleController extends GetxController {
 
   @override
   void onInit() {
-    print('PersonaleController: onInit()');
+    //print('PersonaleController: onInit()');
     super.onInit();
     _loadUserData().then((_) {
       if (supabase.auth.currentUser != null) {
         _subscribeToOnlineUsers();
       } else {
-        print("PersonaleController.onInit: Utente non loggato, non mi iscrivo a presence.");
+        //print("PersonaleController.onInit: Utente non loggato, non mi iscrivo a presence.");
       }
     });
     _loadAppVersion();
 
     supabase.auth.onAuthStateChange.listen((data) {
       final AuthChangeEvent event = data.event;
-      print("PersonaleController.onAuthStateChange: Evento $event");
+      //print("PersonaleController.onAuthStateChange: Evento $event");
       if (event == AuthChangeEvent.signedIn) {
         _activeUserIds.clear(); // Pulisci ID attivi per nuovo login
         if (personale.value == null) {
@@ -63,16 +63,16 @@ class PersonaleController extends GetxController {
 
   @override
   void onClose() {
-    print('PersonaleController: onClose()');
+    //print('PersonaleController: onClose()');
     _unsubscribeFromOnlineUsers();
     super.onClose();
   }
 
   void _subscribeToOnlineUsers() {
-    print('PersonaleController: _subscribeToOnlineUsers()');
+    //print('PersonaleController: _subscribeToOnlineUsers()');
     final userId = supabase.auth.currentUser?.id;
     if (userId == null) {
-      print("  AUTH: Utente non autenticato, impossibile iscriversi.");
+      //print("  AUTH: Utente non autenticato, impossibile iscriversi.");
       _isPresenceChannelReady = false;
       _activeUserIds.clear();
       _updateConnectedUsersCountFromSet(); // Aggiorna il contatore (a 0)
@@ -81,7 +81,7 @@ class PersonaleController extends GetxController {
 
     // Se il canale esiste già e il flag indica che è pronto, non fare nulla se non un log e un potenziale refresh.
     if (_onlineUsersChannel != null && _isPresenceChannelReady) {
-      print("  CANALE: Già sottoscritto e PRONTO. Stampo stato attuale e tento riconciliazione.");
+      //print("  CANALE: Già sottoscritto e PRONTO. Stampo stato attuale e tento riconciliazione.");
       _debugPrintFullPresenceState();
       _reconcileActiveUserIdsFromListSinglePresenceState(); // Assicura coerenza
       // _updateConnectedUsersCountFromSet(); // reconcile... chiama già update...
@@ -91,12 +91,12 @@ class PersonaleController extends GetxController {
     // Se il canale esiste ma non è pronto (es. _isPresenceChannelReady è false),
     // è meglio rimuoverlo e ricrearlo per garantire uno stato pulito.
     if (_onlineUsersChannel != null && !_isPresenceChannelReady) {
-      print("  CANALE: Esistente ma non pronto. Rimuovo e ricreo.");
+      //print("  CANALE: Esistente ma non pronto. Rimuovo e ricreo.");
       supabase.removeChannel(_onlineUsersChannel!); // Non serve await
       _onlineUsersChannel = null;
     }
 
-    print("  CANALE: Creazione e sottoscrizione a 'online-users'.");
+    //print("  CANALE: Creazione e sottoscrizione a 'online-users'.");
     _isPresenceChannelReady = false;
     _activeUserIds.clear(); // Pulisci prima di una nuova sottoscrizione
     _onlineUsersChannel = supabase.channel(
@@ -106,9 +106,9 @@ class PersonaleController extends GetxController {
 
     _onlineUsersChannel!.onPresenceSync((payload) {
       // payload qui è RealtimePresenceSyncPayload
-      print('  EVENTO: Presence SYNC ricevuto.');
+      //print('  EVENTO: Presence SYNC ricevuto.');
       if (!_isPresenceChannelReady) {
-        print("    CANALE: Canale PRONTO dopo SYNC.");
+        //print("    CANALE: Canale PRONTO dopo SYNC.");
         _isPresenceChannelReady = true;
       }
       // Al SYNC, tentiamo di riconciliare _activeUserIds con lo stato completo.
@@ -116,7 +116,7 @@ class PersonaleController extends GetxController {
       _debugPrintFullPresenceState(); // Stampa lo stato per investigazione
     }).onPresenceJoin((payload) {
       // payload è RealtimePresenceJoinPayload
-      print('  EVENTO: Presence JOIN. Nuove presenze: ${payload.newPresences.length}');
+      //print('  EVENTO: Presence JOIN. Nuove presenze: ${payload.newPresences.length}');
       bool changed = false;
       for (final Presence newPresence in payload.newPresences) {
         // payload.newPresences è List<Presence>
@@ -129,13 +129,13 @@ class PersonaleController extends GetxController {
         }
       }
       if (!_isPresenceChannelReady && payload.newPresences.isNotEmpty) {
-        print("    CANALE: Canale PRONTO dopo JOIN con dati.");
+        //print("    CANALE: Canale PRONTO dopo JOIN con dati.");
         _isPresenceChannelReady = true;
       }
       if (changed) _updateConnectedUsersCountFromSet();
     }).onPresenceLeave((payload) {
       // payload è RealtimePresenceLeavePayload
-      print('  EVENTO: Presence LEAVE. Uscite: ${payload.leftPresences.length}');
+      //print('  EVENTO: Presence LEAVE. Uscite: ${payload.leftPresences.length}');
       bool changed = false;
       for (final Presence leftPresence in payload.leftPresences) {
         // payload.leftPresences è List<Presence>
@@ -151,28 +151,28 @@ class PersonaleController extends GetxController {
     });
 
     _onlineUsersChannel!.subscribe((status, [error]) async {
-      print("  CANALE: Stato sottoscrizione 'online-users': $status.");
+      //print("  CANALE: Stato sottoscrizione 'online-users': $status.");
       if (status == RealtimeSubscribeStatus.subscribed) {
-        print('    CANALE: Sottoscrizione avvenuta. Traccio presenza...');
+        //print('    CANALE: Sottoscrizione avvenuta. Traccio presenza...');
         try {
           await _onlineUsersChannel!.track({
             'user_id': userId, // userId è garantito non nullo qui
             'online_at': DateTime.now().toIso8601String(),
           });
-          print('    CANALE: Presenza utente (ID: $userId) tracciata.');
+          //print('    CANALE: Presenza utente (ID: $userId) tracciata.');
           // L'evento JOIN per 'self' (dovuto a self:true) popolerà _activeUserIds.
-        } catch (e, s) {
-          print('    CANALE ERRORE track: $e\n$s');
+        } catch (e) {
+          //print('    CANALE ERRORE track: $e\n$s');
           _isPresenceChannelReady = false; // Se track fallisce, il canale potrebbe essere instabile
         }
       } else if (status == RealtimeSubscribeStatus.channelError || status == RealtimeSubscribeStatus.timedOut) {
-        print('    CANALE ERRORE sottoscrizione: $error, status: $status.');
+        //print('    CANALE ERRORE sottoscrizione: $error, status: $status.');
         message.value = 'Errore Realtime: $error';
         _isPresenceChannelReady = false;
         _activeUserIds.clear();
         _updateConnectedUsersCountFromSet();
       } else if (status == RealtimeSubscribeStatus.closed) {
-        print('    CANALE: Sottoscrizione CHIUSA.');
+        //print('    CANALE: Sottoscrizione CHIUSA.');
         _isPresenceChannelReady = false;
         _activeUserIds.clear();
         _updateConnectedUsersCountFromSet();
@@ -186,23 +186,23 @@ class PersonaleController extends GetxController {
     if (connectedUsers.value != newCount) {
       connectedUsers.value = newCount;
     }
-    print('  CONTEGGIO (from _activeUserIds Set): Utenti connessi: ${connectedUsers.value}');
+    //print('  CONTEGGIO (from _activeUserIds Set): Utenti connessi: ${connectedUsers.value}');
   }
 
   // Metodo per riconciliare _activeUserIds usando List<SinglePresenceState>
   // dove ogni SinglePresenceState ha una proprietà 'presences' che è List<Presence>.
   void _reconcileActiveUserIdsFromListSinglePresenceState() {
     if (_onlineUsersChannel == null || !_isPresenceChannelReady) {
-      print('  RICONCILIAZIONE (List<SinglePresenceState>): Canale non pronto o nullo.');
+      //print('  RICONCILIAZIONE (List<SinglePresenceState>): Canale non pronto o nullo.');
       return;
     }
 
-    print('  RICONCILIAZIONE (List<SinglePresenceState>): Tentativo...');
+    //print('  RICONCILIAZIONE (List<SinglePresenceState>): Tentativo...');
     try {
       // Otteniamo la lista. Il tipo statico è List<SinglePresenceState> secondo il compilatore.
       // Accederemo alle sue proprietà dinamicamente basandoci sui log precedenti.
       final List<dynamic> presenceStateList = _onlineUsersChannel!.presenceState();
-      print('    RICONCILIAZIONE: presenceState() ha restituito Lista di ${presenceStateList.length} elementi.');
+      //print('    RICONCILIAZIONE: presenceState() ha restituito Lista di ${presenceStateList.length} elementi.');
 
       final Set<String> idsExtractedFromState = {};
 
@@ -227,35 +227,35 @@ class PersonaleController extends GetxController {
                       }
                     }
                   } else {
-                    print('      RICONCILIAZIONE AVVISO: presenceItem_dynamic.payload non è una Map valida o è null. Payload: $payloadProperty');
+                    //print('      RICONCILIAZIONE AVVISO: presenceItem_dynamic.payload non è una Map valida o è null. Payload: $payloadProperty');
                   }
                 }
               }
             } else {
-              print('      RICONCILIAZIONE AVVISO: singleStateItem_dynamic.presences non è una Lista valida o è null. Valore di .presences: $presencesListProperty');
+              //print('      RICONCILIAZIONE AVVISO: singleStateItem_dynamic.presences non è una Lista valida o è null. Valore di .presences: $presencesListProperty');
             }
-          } catch (e, s) {
-            print('      RICONCILIAZIONE ERRORE INTERNO loop: Elaborazione singleStateItem fallita. Errore: $e\nItem: $singleStateItem_dynamic\nStack: $s');
+          } catch (e) {
+            //print('      RICONCILIAZIONE ERRORE INTERNO loop: Elaborazione singleStateItem fallita. Errore: $e\nItem: $singleStateItem_dynamic\nStack: $s');
           }
         }
       }
 
       // Confronta e sincronizza _activeUserIds con idsExtractedFromState
       if (!_areSetsEqual(idsExtractedFromState, _activeUserIds)) {
-        print('    RICONCILIAZIONE: Discrepanza! Sincronizzo _activeUserIds con stato da presenceState().');
-        print('      _activeUserIds (da JOIN/LEAVE) prima: $_activeUserIds');
-        print('      idsExtractedFromState (da presenceState()): $idsExtractedFromState');
+        //print('    RICONCILIAZIONE: Discrepanza! Sincronizzo _activeUserIds con stato da presenceState().');
+        //print('      _activeUserIds (da JOIN/LEAVE) prima: $_activeUserIds');
+        //print('      idsExtractedFromState (da presenceState()): $idsExtractedFromState');
         _activeUserIds.clear();
         _activeUserIds.addAll(idsExtractedFromState);
-        print('      _activeUserIds dopo sincronizzazione: $_activeUserIds');
+        //print('      _activeUserIds dopo sincronizzazione: $_activeUserIds');
       } else {
-        print('    RICONCILIAZIONE: Nessuna discrepanza tra _activeUserIds e idsExtractedFromState. Stato coerente.');
+        //print('    RICONCILIAZIONE: Nessuna discrepanza tra _activeUserIds e idsExtractedFromState. Stato coerente.');
       }
 
       // Aggiorna il conteggio finale basato su _activeUserIds (che ora dovrebbe essere sincronizzato)
       _updateConnectedUsersCountFromSet();
-    } catch (e, s) {
-      print('  RICONCILIAZIONE ERRORE ESTERNO (List<SinglePresenceState>): $e \n$s');
+    } catch (e) {
+      //print('  RICONCILIAZIONE ERRORE ESTERNO (List<SinglePresenceState>): $e \n$s');
     }
   }
 
@@ -269,73 +269,71 @@ class PersonaleController extends GetxController {
 
   void _debugPrintFullPresenceState() {
     if (_onlineUsersChannel == null || !_isPresenceChannelReady) {
-      print('  DEBUG_FULL_PRESENCE_STATE: Canale non pronto o nullo.');
+      //print('  DEBUG_FULL_PRESENCE_STATE: Canale non pronto o nullo.');
       return;
     }
     try {
       final List<dynamic> stateListRaw = _onlineUsersChannel!.presenceState();
       final List<dynamic> stateList = stateListRaw; // Ora sappiamo che è una lista
 
-      print('  DEBUG_FULL_PRESENCE_STATE: presenceState() -> Lista di ${stateList.length} elementi:');
+      //print('  DEBUG_FULL_PRESENCE_STATE: presenceState() -> Lista di ${stateList.length} elementi:');
       for (int i = 0; i < stateList.length; i++) {
         final singleState = stateList[i];
-        print('    [$i] Tipo Oggetto: $singleState.runtimeType');
-        print('        Valore (toString): ${singleState.toString()}');
+        //print('    [$i] Tipo Oggetto: $singleState.runtimeType');
+        //print('        Valore (toString): ${singleState.toString()}');
 
         // Tentativi di accesso dinamico (SOLO PER DEBUG)
         dynamic dynState = singleState;
         try {
-          print('        (dyn.key se esiste): ${dynState.key}');
+          //print('        (dyn.key se esiste): ${dynState.key}');
         } catch (_) {
-          print('        (dyn.key non accessibile)');
+          //print('        (dyn.key non accessibile)');
         }
         try {
           final dynPresences = dynState.presences;
-          print('        (dyn.presences se esiste, tipo: ${dynPresences.runtimeType}): $dynPresences');
+          //print('        (dyn.presences se esiste, tipo: ${dynPresences.runtimeType}): $dynPresences');
           if (dynPresences is List && dynPresences.isNotEmpty) {
             for (var k = 0; k < dynPresences.length; k++) {
               final itemInPresences = dynPresences[k];
-              print('          (dyn.presences[$k], tipo: ${itemInPresences.runtimeType}): $itemInPresences');
+              //print('          (dyn.presences[$k], tipo: ${itemInPresences.runtimeType}): $itemInPresences');
               if (itemInPresences != null) {
-                dynamic dynItemInPresences = itemInPresences;
                 try {
-                  print('            (dyn.presences[$k].payload): ${dynItemInPresences.payload}');
+                  //print('            (dyn.presences[$k].payload): ${dynItemInPresences.payload}');
                 } catch (_) {
-                  print('            (dyn.presences[$k].payload non accessibile)');
+                  //print('            (dyn.presences[$k].payload non accessibile)');
                 }
               }
             }
           } else if (dynPresences != null) {
             // Se non è una lista ma esiste (improbabile per 'presences')
-            dynamic dynSinglePresence = dynPresences;
             try {
-              print('          (dyn.presences.payload se dyn.presences è un oggetto con payload): ${dynSinglePresence.payload}');
+              //print('          (dyn.presences.payload se dyn.presences è un oggetto con payload): ${dynSinglePresence.payload}');
             } catch (_) {
-              print('          (dyn.presences.payload non accessibile)');
+              //print('          (dyn.presences.payload non accessibile)');
             }
           }
         } catch (_) {
-          print('        (dyn.presences non accessibile o errore ulteriore)');
+          //print('        (dyn.presences non accessibile o errore ulteriore)');
         }
       }
       if (stateList.isEmpty) {
-        print('    La lista di presenceState è vuota.');
+        //print('    La lista di presenceState è vuota.');
       }
-    } catch (e, s) {
-      print('  DEBUG_FULL_PRESENCE_STATE: Errore durante la stampa: $e\n$s');
+    } catch (e) {
+      //print('  DEBUG_FULL_PRESENCE_STATE: Errore durante la stampa: $e\n$s');
     }
   }
 
   Future<void> _unsubscribeFromOnlineUsers() async {
-    print('PersonaleController: _unsubscribeFromOnlineUsers()');
+    //print('PersonaleController: _unsubscribeFromOnlineUsers()');
     if (_onlineUsersChannel != null) {
-      print("  CANALE: Tentativo di unsubscribe da 'online-users'.");
+      //print("  CANALE: Tentativo di unsubscribe da 'online-users'.");
       _isPresenceChannelReady = false;
       try {
         await _onlineUsersChannel!.unsubscribe();
-        print("  CANALE: Unsubscribe completato.");
-      } catch (e, s) {
-        print("  CANALE ERRORE unsubscribe: $e - $s");
+        //print("  CANALE: Unsubscribe completato.");
+      } catch (e) {
+        //print("  CANALE ERRORE unsubscribe: $e - $s");
       } finally {
         // supabase.removeChannel(_onlineUsersChannel!); // Rimuovere il canale qui è più pulito
         _onlineUsersChannel = null;
@@ -343,7 +341,7 @@ class PersonaleController extends GetxController {
       _activeUserIds.clear();
       _updateConnectedUsersCountFromSet();
     } else {
-      print("  CANALE: Nessun canale da cui fare unsubscribe.");
+      //print("  CANALE: Nessun canale da cui fare unsubscribe.");
       if (_activeUserIds.isNotEmpty || connectedUsers.value != 0) {
         _activeUserIds.clear();
         _updateConnectedUsersCountFromSet();
@@ -352,18 +350,18 @@ class PersonaleController extends GetxController {
   }
 
   Future<void> _loadUserData() async {
-    print('PersonaleController: _loadUserData()');
+    //print('PersonaleController: _loadUserData()');
     message.value = 'Caricamento dati utente...';
     final user = supabase.auth.currentUser;
 
     if (user == null) {
       message.value = 'Utente non autenticato.';
-      print('  AUTH: Utente non autenticato.');
+      //print('  AUTH: Utente non autenticato.');
       if (personale.value != null) personale.value = null;
       return;
     }
     final email = user.email!;
-    print('  AUTH: Caricamento dati per: $email (ID: ${user.id})');
+    //print('  AUTH: Caricamento dati per: $email (ID: ${user.id})');
 
     try {
       final List<dynamic> response = await supabase.from('personale').select().eq('email_principale', email).limit(1);
@@ -371,48 +369,48 @@ class PersonaleController extends GetxController {
       if (response.isNotEmpty) {
         final Map<String, dynamic> userData = response.first as Map<String, dynamic>;
         personale.value = Personale.fromJson(userData);
-        print('  AUTH: Personale model caricato: ${personale.value?.fullName}');
+        //print('  AUTH: Personale model caricato: ${personale.value?.fullName}');
         message.value = 'Dati utente caricati.';
       } else {
-        print('  AUTH: Nessun record Personale per: $email');
+        //print('  AUTH: Nessun record Personale per: $email');
         if (personale.value != null) personale.value = null;
         message.value = 'Profilo personale non trovato.';
       }
-    } catch (err, stackTrace) {
+    } catch (err) {
       message.value = 'Errore caricamento dati utente.';
-      print('  AUTH ERRORE: $err\n$stackTrace');
+      //print('  AUTH ERRORE: $err\n$stackTrace');
       if (personale.value != null) personale.value = null;
     }
-    print('  AUTH: Fine _loadUserData. Personale: ${personale.value != null ? "caricato" : "null"}. Msg: "${message.value}"');
+    //print('  AUTH: Fine _loadUserData. Personale: ${personale.value != null ? "caricato" : "null"}. Msg: "${message.value}"');
   }
 
   Future<void> _loadAppVersion() async {
-    print('PersonaleController: _loadAppVersion()');
+    //print('PersonaleController: _loadAppVersion()');
     try {
       final info = await PackageInfo.fromPlatform();
       appVersion.value = info.version + (info.buildNumber.isNotEmpty && info.buildNumber != "0" ? "+${info.buildNumber}" : "");
     } catch (e) {
-      print("  APP: Errore versione app: $e");
+      //print("  APP: Errore versione app: $e");
       appVersion.value = "N/A";
     }
   }
 
   Future<void> reload() async {
-    print('PersonaleController: reload()');
+    //print('PersonaleController: reload()');
     message.value = 'Ricaricamento...';
     await _loadUserData();
 
     if (supabase.auth.currentUser != null) {
       if (_onlineUsersChannel == null || !_isPresenceChannelReady) {
-        print("  APP: Utente loggato, canale non pronto/nullo. (Ri)sottoscrivo.");
+        //print("  APP: Utente loggato, canale non pronto/nullo. (Ri)sottoscrivo.");
         _subscribeToOnlineUsers();
       } else {
-        print("  APP: Utente loggato, canale già attivo. Stampo stato per debug e tento riconciliazione.");
+        //print("  APP: Utente loggato, canale già attivo. Stampo stato per debug e tento riconciliazione.");
         _debugPrintFullPresenceState();
         _reconcileActiveUserIdsFromListSinglePresenceState();
       }
     } else {
-      print("  APP: Utente non loggato. Assicuro disiscrizione.");
+      //print("  APP: Utente non loggato. Assicuro disiscrizione.");
       await _unsubscribeFromOnlineUsers();
     }
     message.value = 'Ricaricamento completato.';

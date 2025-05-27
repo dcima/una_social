@@ -26,6 +26,11 @@ class _LoginScreenState extends State<LoginScreen> {
   StreamSubscription<AuthState>? _authStateSubscription;
   bool _isPasswordObscured = true;
 
+  // FocusNodes
+  final _emailFocusNode = FocusNode();
+  final _passwordFocusNode = FocusNode();
+  final _otpFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
@@ -52,13 +57,19 @@ class _LoginScreenState extends State<LoginScreen> {
     _passwordController.dispose();
     _otpController.dispose();
     _authStateSubscription?.cancel();
+    // Dispose FocusNodes
+    _emailFocusNode.dispose();
+    _passwordFocusNode.dispose();
+    _otpFocusNode.dispose();
     super.dispose();
   }
 
   Future<void> _signIn() async {
+    // Nasconde la tastiera
+    FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) {
       // La validazione del form mostrerà i messaggi di errore nei TextFormField
-      print("Form validation failed for Email/Password sign in.");
+      //print("Form validation failed for Email/Password sign in.");
       return;
     }
     if (mounted) {
@@ -88,14 +99,24 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _verifyOtpInvite() async {
+    // Nasconde la tastiera
+    FocusScope.of(context).unfocus();
     final email = _emailController.text.trim();
     final otp = _otpController.text.trim();
 
-    if (email.isEmpty || !email.contains('@')) {
+    // Validazione preliminare, anche se il validator del form per OTP fa già qualcosa
+    if (email.isEmpty) {
+      _formKey.currentState?.validate(); // Forza la validazione dell'email se vuota
+      SnackbarHelper.showErrorSnackbar(context, 'Inserisci un\'email per verificare il codice.');
+      return;
+    } else if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$").hasMatch(email)) {
+      _formKey.currentState?.validate(); // Forza la validazione dell'email se non valida
       SnackbarHelper.showErrorSnackbar(context, 'Inserisci un\'email valida per verificare il codice.');
       return;
     }
+
     if (otp.isEmpty || otp.length != 6 || !RegExp(r'^[0-9]+$').hasMatch(otp)) {
+      _formKey.currentState?.validate(); // Forza la validazione del campo OTP
       SnackbarHelper.showErrorSnackbar(context, 'Inserisci un codice di invito valido (6 cifre).');
       return;
     }
@@ -129,9 +150,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // _signInWithGoogle non è nel tuo codice, la rimuovo per brevità se non necessaria
-  // Future<void> _signInWithGoogle() async { ... }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -143,6 +161,7 @@ class _LoginScreenState extends State<LoginScreen> {
             constraints: const BoxConstraints(maxWidth: 400),
             child: Form(
               key: _formKey,
+              autovalidateMode: AutovalidateMode.onUserInteraction, // <-- MODIFICA CHIAVE
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -155,10 +174,21 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 30),
                   TextFormField(
                     controller: _emailController,
+                    focusNode: _emailFocusNode,
                     decoration: const InputDecoration(labelText: 'Email *'),
                     keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    onFieldSubmitted: (_) {
+                      FocusScope.of(context).requestFocus(_passwordFocusNode);
+                    },
                     validator: (value) {
-                      if (value == null || value.isEmpty || !value.contains('@')) {
+                      if (value == null || value.isEmpty) {
+                        return 'Inserisci un\'email';
+                      }
+                      // Regex semplice per il formato email. Per una validazione RFC completa, la regex è molto più complessa.
+                      // Questa copre la maggior parte dei casi comuni: qualcosa@qualcosa.dominio
+                      final emailRegex = RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$");
+                      if (!emailRegex.hasMatch(value)) {
                         return 'Inserisci un\'email valida';
                       }
                       return null;
@@ -167,6 +197,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 15),
                   TextFormField(
                     controller: _passwordController,
+                    focusNode: _passwordFocusNode,
                     obscureText: _isPasswordObscured,
                     decoration: InputDecoration(
                       labelText: 'Password',
@@ -176,9 +207,23 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: () => setState(() => _isPasswordObscured = !_isPasswordObscured),
                       ),
                     ),
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) {
+                      if (!_isLoading) {
+                        _signIn();
+                      }
+                    },
                     validator: (value) {
-                      if (_otpController.text.isEmpty && (value == null || value.isEmpty || value.length < 6)) {
-                        return 'La password deve avere almeno 6 caratteri (se non usi il codice invito)';
+                      // Se il campo OTP è compilato, la password non è strettamente obbligatoria
+                      // per questo validator, dato che l'utente potrebbe voler usare l'OTP.
+                      // La logica in _signIn() si occuperà di richiederla se necessario.
+                      if (_otpController.text.trim().isEmpty) {
+                        if (value == null || value.isEmpty) {
+                          return 'Inserisci la password';
+                        }
+                        if (value.length < 6) {
+                          return 'La password deve avere almeno 6 caratteri';
+                        }
                       }
                       return null;
                     },
@@ -207,17 +252,35 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 15),
                   TextFormField(
-                    controller: _otpController,
-                    decoration: const InputDecoration(
-                      labelText: 'Codice Invito (6 cifre)',
-                      counterText: "",
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    maxLength: 6,
-                    textAlign: TextAlign.center,
-                    // Validator non strettamente necessario qui se _verifyOtpInvite fa i controlli
-                  ),
+                      controller: _otpController,
+                      focusNode: _otpFocusNode,
+                      decoration: const InputDecoration(
+                        labelText: 'Codice Invito (6 cifre)',
+                        counterText: "",
+                      ),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      maxLength: 6,
+                      textAlign: TextAlign.center,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) {
+                        if (!_isLoading) {
+                          _verifyOtpInvite();
+                        }
+                      },
+                      validator: (value) {
+                        // Questo validator si attiva solo se l'utente inserisce qualcosa nel campo OTP.
+                        // Non è obbligatorio se il campo è lasciato vuoto (perché l'utente potrebbe usare email/password).
+                        if (value != null && value.isNotEmpty) {
+                          if (value.length != 6) {
+                            return 'Il codice deve essere di 6 cifre.';
+                          }
+                          if (!RegExp(r'^[0-9]+$').hasMatch(value)) {
+                            return 'Il codice deve contenere solo cifre.';
+                          }
+                        }
+                        return null;
+                      }),
                   const SizedBox(height: 15),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(

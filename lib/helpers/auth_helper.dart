@@ -14,13 +14,13 @@ class AuthHelper {
   static LogoutReason get lastLogoutReason => _lastLogoutReason;
 
   static void setLogoutReason(LogoutReason reason) {
-    print("[AuthHelper] LogoutReason impostata a: $reason");
+    //print("[AuthHelper] LogoutReason impostata a: $reason");
     _lastLogoutReason = reason;
   }
 
   static void clearLastLogoutReason() {
     if (_lastLogoutReason != LogoutReason.none) {
-      print("[AuthHelper] LogoutReason resettata da: $_lastLogoutReason a none.");
+      //print("[AuthHelper] LogoutReason resettata da: $_lastLogoutReason a none.");
       _lastLogoutReason = LogoutReason.none;
     }
   }
