@@ -1,12 +1,13 @@
 // lib/main.dart
 // ignore_for_file: avoid_print, deprecated_member_use
 
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart'; // *** Importa GetX ***
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social_app/app_router.dart';
 import 'package:una_social_app/controllers/auth_controller.dart'; // *** Importa AuthController ***
+import 'package:una_social_app/helpers/logger_helper.dart'; // Importa il logger
 
 // --- ValueNotifier Globale RIMOSSO ---
 // final ValueNotifier<AuthStatus> appAuthStatusNotifier = ValueNotifier(AuthStatus.loading);
@@ -19,7 +20,8 @@ const String supabaseAnonKeyEnvKey = 'SUPABASE_ANON_KEY';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   setUrlStrategy(PathUrlStrategy());
-  ////print("URL Strategy impostata su Path.");
+
+  logInfo("App avviata. Tentativo di inizializzazione Supabase...");
 
   const String supabaseUrl = String.fromEnvironment(supabaseUrlEnvKey, defaultValue: '');
   const String supabaseAnonKey = String.fromEnvironment(supabaseAnonKeyEnvKey, defaultValue: '');
@@ -33,15 +35,17 @@ Future<void> main() async {
       errorMessage += "$supabaseAnonKeyEnvKey non trovata o vuota. ";
     }
     errorMessage += "Assicurati che siano definite con --dart-define.";
-    //print(errorMessage);
+
+    logError(errorMessage);
+
     runApp(SupabaseErrorApp(error: errorMessage));
     return;
   }
 
-  ////print("Supabase URL (da --dart-define): $supabaseUrl");
+  logInfo("Supabase URL (da --dart-define): $supabaseUrl");
 
   try {
-    //print("Inizializzazione Supabase...");
+    logInfo("Inizializzazione Supabase...");
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
@@ -50,11 +54,11 @@ Future<void> main() async {
       ),
       debug: true, // Puoi impostare a false per produzione
     );
-    //print("Supabase inizializzato.");
+    logInfo("Supabase inizializzato.");
 
     // *** Inizializza AuthController di GetX dopo Supabase ***
     Get.put(AuthController(), permanent: true); // permanent: true per mantenerlo vivo durante tutta l'app
-    print("[Main] AuthController inizializzato con GetX.");
+    logInfo("[Main] AuthController inizializzato con GetX.");
 
     // Il listener onAuthStateChange in AuthController gestirà l'aggiornamento
     // dello stato dei gruppi/permessi. GoRouterRefreshStream (usato da AppRouter)
@@ -63,17 +67,16 @@ Future<void> main() async {
     // uno stato di autenticazione globale come appAuthStatusNotifier.
     // AuthHelper può ancora essere usato per tracciare la ragione del logout.
 
-    //print("Listener onAuthStateChange in AuthController si occuperà dello stato utente.");
+    logInfo("Listener onAuthStateChange in AuthController si occuperà dello stato utente.");
   } catch (e, stackTrace) {
-    // Aggiunto stackTrace per debug
-    print("ERRORE CRITICO init Supabase: $e");
-    print("Stack trace: $stackTrace");
+    logError("ERRORE CRITICO init Supabase:", e, stackTrace);
+
     // Non possiamo usare AuthController qui se Supabase fallisce
     runApp(SupabaseErrorApp(error: "Errore inizializzazione Supabase: ${e.toString()}"));
     return;
   }
 
-  //print("Avvio MyApp...");
+  logInfo("Avvio MyApp...");
   runApp(const MyApp());
 }
 

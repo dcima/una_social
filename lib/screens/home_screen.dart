@@ -8,9 +8,12 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social_app/controllers/personale_controller.dart';
 import 'package:una_social_app/helpers/auth_helper.dart';
+import 'package:una_social_app/helpers/db_grid.dart';
+import 'package:una_social_app/helpers/logger_helper.dart';
 import 'package:una_social_app/models/personale.dart';
 import 'package:una_social_app/painters/star_painter.dart';
 import 'package:una_social_app/screens/personale_profile.dart';
+import 'package:una_social_app/screens/strutture_screen.dart';
 
 // Enum for profile menu actions
 enum ProfileAction { edit, logout, version }
@@ -41,7 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Initialize GetX Controller
   final PersonaleController ctrl = Get.put(PersonaleController());
   // State for toggling grid/list view (if applicable to child)
-  bool gridView = false;
+  //bool gridView = false;
 
   @override
   void initState() {
@@ -58,7 +61,33 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Method to toggle the view state
-  void _toggleView() => setState(() => gridView = !gridView);
+  void _handleToggleView() {
+    appLogger.debug("HomeScreen - _handleToggleView: Tipo di widget.child: ${widget.child.runtimeType}");
+
+    if (widget.child is StruttureScreen) {
+      final struttureScreenWidget = widget.child as StruttureScreen;
+      // Ottieni lo State<DBGridWidget> tramite la chiave
+      final State<DBGridWidget>? actualState = struttureScreenWidget.dbGridWidgetStateKey.currentState;
+
+      if (actualState != null && actualState is DBGridControl) {
+        // Controlla se lo stato implementa l'interfaccia
+        final dbGridControl = actualState as DBGridControl; // Fai il cast all'interfaccia
+        dbGridControl.toggleUIModePublic();
+        appLogger.info("HomeScreen: Chiamato toggleUIModePublic() su DBGridControl.");
+        if (mounted) setState(() {}); // Forza rebuild per aggiornare l'icona
+      } else {
+        appLogger.warning("HomeScreen: Impossibile ottenere currentState o non è un DBGridControl.");
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Errore nel tentativo di cambiare vista (stato non trovato).")),
+        );
+      }
+    } else {
+      appLogger.info("HomeScreen: Toggle view button premuto, ma il child non è StruttureScreen.");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Cambio vista non applicabile a questa schermata.")),
+      );
+    }
+  }
 
   // --- Helper function to show the version view dialog ---
   void _showVersionDialog(BuildContext context, String value) {
@@ -288,16 +317,29 @@ class _HomeScreenState extends State<HomeScreen> {
                         GoRouter.of(drawerContext).go('/home'); // Navigate
                       },
                     ),
-                    ListTile(
-                      leading: const Icon(Icons.storage_rounded, color: primaryBlue),
-                      title: const Text('Database'),
-                      onTap: () {
-                        Navigator.pop(drawerContext); // Use drawerContext to close
-                        GoRouter.of(drawerContext).push('/database'); // Navigate
-                      },
+                    ExpansionTile(
+                      childrenPadding: EdgeInsets.only(left: 15.0), // Padding per i figli dell'ExpansionTile annidato
+                      leading: Icon(Icons.build, color: primaryBlue), // Icon for the ExpansionTile
+                      title: const Text('Sistema', style: TextStyle(color: primaryBlue)),
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.business_center, color: primaryBlue),
+                          title: const Text('Strutture'),
+                          onTap: () {
+                            Navigator.pop(drawerContext); // Use drawerContext to close
+                            GoRouter.of(drawerContext).push('/strutture'); // Navigate
+                          },
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.storage_rounded, color: primaryBlue),
+                          title: const Text('Database'),
+                          onTap: () {
+                            Navigator.pop(drawerContext); // Use drawerContext to close
+                            GoRouter.of(drawerContext).push('/database'); // Navigate
+                          },
+                        ),
+                      ],
                     ),
-                    // Add more ListTiles for other sections...
-
                     const Spacer(), // Pushes following items to the bottom
                     const Divider(),
                     // App Info Item
@@ -362,6 +404,35 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
 
+    bool shouldShowToggleViewButton = false;
+    IconData currentToggleIcon = Icons.view_quilt_outlined; // Default
+    String currentToggleTooltip = "Cambia vista";
+
+    if (widget.child is StruttureScreen) {
+      final struttureScreenWidget = widget.child as StruttureScreen;
+      final config = struttureScreenWidget.gridConfig;
+
+      if (config.uiModes.length > 1) {
+        shouldShowToggleViewButton = true;
+
+        final State<DBGridWidget>? actualState = struttureScreenWidget.dbGridWidgetStateKey.currentState;
+        if (actualState != null && actualState is DBGridControl) {
+          final dbGridControl = actualState as DBGridControl;
+          final currentMode = dbGridControl.currentDisplayUIMode;
+          if (currentMode == UIMode.grid) {
+            currentToggleIcon = Icons.article_outlined;
+            currentToggleTooltip = "Passa a vista modulo";
+          } else if (currentMode == UIMode.form) {
+            currentToggleIcon = Icons.grid_view_rounded;
+            currentToggleTooltip = "Passa a vista griglia";
+          } else if (currentMode == UIMode.map) {
+            currentToggleIcon = Icons.map_outlined;
+            currentToggleTooltip = "Passa a vista mappa";
+          }
+        }
+      }
+    }
+
     // --- Main Scaffold Structure ---
     return Scaffold(
       // Assign the drawer using the helper method
@@ -410,23 +481,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   searchBar,
                   // --- Action Buttons ---
                   IconButton(
+                    key: const Key('reloadButton'),
                     tooltip: "Ricarica Dati Utente",
                     icon: const Icon(Icons.refresh),
-                    onPressed: ctrl.reload, // Call controller's reload method
-                  ),
-                  IconButton(
-                    tooltip: gridView ? "Passa a vista elenco" : "Passa a vista griglia",
-                    icon: Icon(gridView ? Icons.grid_view_rounded : Icons.view_list_rounded),
-                    onPressed: _toggleView, // Toggle local state
-                  ),
-                  IconButton(
-                    tooltip: "Impostazioni Applicazione",
-                    icon: const Icon(Icons.settings_outlined),
                     onPressed: () {
-                      _showSnackbar(context, "Impostazioni non implementate.");
-                      // TODO: Navigate to settings screen: GoRouter.of(context).push('/settings');
-                    },
+                      if (widget.child is DBGridWidget) {
+                        ctrl.reload();
+                        logInfo("Reload generale richiesto da HomeScreen");
+                      }
+                    }, // Call controller's reload method
                   ),
+                  if (shouldShowToggleViewButton)
+                    IconButton(
+                      key: const Key('toggleViewButton'),
+                      tooltip: currentToggleTooltip, // Aggiorna dinamicamente se possibile
+                      icon: Icon(currentToggleIcon), // Aggiorna dinamicamente se possibile
+                      onPressed: _handleToggleView,
+                    ), // Call toggle method
+
                   const SizedBox(width: 10),
 
                   // --- Profile Avatar and Menu ---

@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:una_social_app/helpers/logger_helper.dart';
 import 'dart:async';
 
 import 'package:una_social_app/screens/home_screen.dart';
@@ -11,6 +12,7 @@ import 'package:una_social_app/screens/login_screen.dart';
 import 'package:una_social_app/screens/set_password_screen.dart';
 import 'package:una_social_app/screens/splash_screen.dart';
 import 'package:una_social_app/screens/database_screen.dart';
+import 'package:una_social_app/screens/strutture_screen.dart';
 import 'package:una_social_app/screens/unauthorized_screen.dart';
 
 final _supabase = Supabase.instance.client;
@@ -21,13 +23,13 @@ Future<bool> checkCurrentUserIsSuperAdmin() async {
   // Non ha più bisogno del parametro User
   // L'utente deve essere loggato per chiamare una funzione che usa auth.uid()
   if (_supabase.auth.currentUser == null) {
-    print("[AppRouter] checkCurrentUserIsSuperAdmin: Utente nullo, non può essere Super Admin.");
+    logError("[AppRouter] checkCurrentUserIsSuperAdmin: Utente nullo, non può essere Super Admin.");
     return false;
   }
 
   try {
     const String superAdminGroupName = 'SUPER-ADMIN'; // Definisci il nome del gruppo una volta
-    print("[AppRouter] checkCurrentUserIsSuperAdmin: Chiamata RPC 'current_user_is_in_group' con parametro '$superAdminGroupName'");
+    logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Chiamata RPC 'current_user_is_in_group' con parametro '$superAdminGroupName'");
 
     final dynamic response = await _supabase.rpc(
       'current_user_is_in_group',
@@ -38,14 +40,14 @@ Future<bool> checkCurrentUserIsSuperAdmin() async {
     // Il client Supabase Dart per RPC lo restituirà direttamente come bool.
     if (response is bool) {
       final bool isAdmin = response;
-      print("[AppRouter] checkCurrentUserIsSuperAdmin: Risultato RPC (boolean): $isAdmin");
+      logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Risultato RPC (boolean): $isAdmin");
       return isAdmin;
     } else {
-      print("[AppRouter] checkCurrentUserIsSuperAdmin: Risposta RPC non è booleana, tipo: ${response.runtimeType}, Data: $response. Considerato non admin.");
+      logError("[AppRouter] checkCurrentUserIsSuperAdmin: Risposta RPC non è booleana, tipo: ${response.runtimeType}, Data: $response. Considerato non admin.");
       return false; // In caso di risposta inattesa, assumi non admin per sicurezza
     }
   } catch (e) {
-    print("[AppRouter] checkCurrentUserIsSuperAdmin: Errore durante chiamata RPC: $e");
+    logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Errore durante chiamata RPC: $e");
     return false; // In caso di errore, assumi non admin
   }
 }
@@ -136,11 +138,30 @@ class AppRouter {
           // Chiama la funzione async per verificare il ruolo
           if (!await checkCurrentUserIsSuperAdmin()) {
             // Non serve più passare 'user'
-            print('[GoRouter Redirect /database] L_utente non è Super Admin (da RPC current_user_is_in_group). Redirect a /unauthorized.');
+            logInfo('[GoRouter Redirect /database] L\'utente non è Super Admin (da RPC current_user_is_in_group). Redirect a /unauthorized.');
             return '/unauthorized';
           }
-          print('[GoRouter Redirect /database] L_utente è Super Admin (da RPC current_user_is_in_group). Accesso consentito.');
+          logInfo('[GoRouter Redirect /database] L_utente è Super Admin (da RPC current_user_is_in_group). Accesso consentito.');
           return null;
+        },
+      ),
+      GoRoute(
+        path: '/strutture', // Definisci il percorso
+        name: 'strutture', // Nome opzionale per la rotta
+        builder: (context, state) => HomeScreen(
+          screenName: 'Gestione Strutture', // Nome da mostrare nell'app bar
+          child: StruttureScreen(), // Il contenuto principale è la tua nuova schermata
+        ),
+        redirect: (context, state) async {
+          final user = _supabase.auth.currentUser;
+          if (user == null) return '/login';
+          if (user.userMetadata?['has_set_password'] != true) return '/set-password';
+
+          // Esempio: solo SUPER-ADMIN può vedere le strutture
+          // if (!await checkCurrentUserIsSuperAdmin()) {
+          //   return '/unauthorized';
+          // }
+          return null; // Permetti accesso se i controlli passano
         },
       ),
       GoRoute(
@@ -157,7 +178,7 @@ class AppRouter {
       final bool passwordSet = user?.userMetadata?['has_set_password'] == true;
       final String currentMatchedLocation = state.matchedLocation;
 
-      // print('[GoRouter Global Redirect] Path: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet');
+      logInfo('[GoRouter Global Redirect] Path: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet');
 
       final isPublicRoute = (currentMatchedLocation == '/login' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/' || currentMatchedLocation == '/unauthorized');
 

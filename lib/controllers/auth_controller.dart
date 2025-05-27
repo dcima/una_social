@@ -2,7 +2,8 @@
 // ignore_for_file: avoid_print
 
 import 'package:get/get.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Per Supabase client
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:una_social_app/helpers/logger_helper.dart'; // Per Supabase client
 
 class AuthController extends GetxController {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -24,18 +25,18 @@ class AuthController extends GetxController {
       final AuthChangeEvent event = data.event;
       final Session? session = data.session;
 
-      print('[AuthController] Auth Event: $event');
+      logInfo('[AuthController] Auth Event: $event');
       if (event == AuthChangeEvent.signedIn) {
-        print('[AuthController] User signed in. Session: ${session != null}');
+        logInfo('[AuthController] User signed in. Session: ${session != null}');
         if (session != null) {
           // Dopo il login, prova a caricare i gruppi dal token e/o dal DB
           _loadUserGroupsFromTokenAndFallback(session.user);
         }
       } else if (event == AuthChangeEvent.signedOut) {
-        print('[AuthController] User signed out.');
+        logInfo('[AuthController] User signed out.');
         clearUserPermissions(); // Pulisci i permessi al logout
       } else if (event == AuthChangeEvent.tokenRefreshed || event == AuthChangeEvent.userUpdated) {
-        print('[AuthController] Token refreshed or user updated. Session: ${session != null}');
+        logInfo('[AuthController] Token refreshed or user updated. Session: ${session != null}');
         if (session != null) {
           _loadUserGroupsFromTokenAndFallback(session.user); // Ricarica i gruppi
         }
@@ -66,12 +67,12 @@ class AuthController extends GetxController {
     if (groupsClaim != null && groupsClaim is List) {
       try {
         groupsFromToken = List<String>.from(groupsClaim.map((item) => item.toString()));
-        print('[AuthController] Groups from token appMetadata: $groupsFromToken');
+        logInfo('[AuthController] Groups from token appMetadata: $groupsFromToken');
       } catch (e) {
-        print('[AuthController] Error parsing groups from token appMetadata: $e');
+        logError('[AuthController] Error parsing groups from token appMetadata:', e);
       }
     } else {
-      print('[AuthController] No "groups" claim found in token appMetadata for user ${user.email}. Claim was: $groupsClaim');
+      logError('[AuthController] No "groups" claim found in token appMetadata for user ${user.email}. Claim was: $groupsClaim');
     }
 
     if (groupsFromToken.isNotEmpty) {
@@ -81,13 +82,13 @@ class AuthController extends GetxController {
       // allora prova a chiamare la funzione RPC per ottenere i gruppi.
       // Questo è utile se i trigger del DB hanno aggiornato i metadati
       // ma il token non è ancora stato rinfrescato.
-      print('[AuthController] Groups not in token or empty, attempting RPC fallback for user ${user.email}.');
+      logWarning('[AuthController] Groups not in token or empty, attempting RPC fallback for user ${user.email}.');
       await fetchUserGroupsViaRpc(user); // Passa l'utente per usare il suo ID
     } else {
       // Se i gruppi non sono nel token E questo era già un tentativo di fallback RPC,
       // allora significa che l'utente probabilmente non ha gruppi.
       // Imposta i gruppi a vuoti.
-      print('[AuthController] Groups still not found after RPC fallback for user ${user.email}, or RPC not configured. Setting empty groups.');
+      logWarning('[AuthController] Groups still not found after RPC fallback for user ${user.email}, or RPC not configured. Setting empty groups.');
       setUserGroups([]); // Assicura che i gruppi siano vuoti
     }
     isLoadingGroups.value = false;
