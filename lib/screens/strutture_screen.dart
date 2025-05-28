@@ -1,15 +1,19 @@
 // lib/screens/strutture_screen.dart
 import 'package:flutter/material.dart';
-import 'package:una_social_app/helpers/db_grid.dart';
+import 'package:una_social_app/helpers/db_grid.dart'; // DBGridProvider is here
 
-class StruttureScreen extends StatefulWidget {
+class StruttureScreen extends StatefulWidget implements DBGridProvider {
+  // Implement interface
   final GlobalKey<State<DBGridWidget>> dbGridWidgetStateKey = GlobalKey<State<DBGridWidget>>();
-  final DBGridConfig gridConfig;
+
+  // The field that holds the config
+  final DBGridConfig _internalGridConfig;
 
   StruttureScreen({super.key})
-      : gridConfig = DBGridConfig(
+      : _internalGridConfig = DBGridConfig(
+          // Initialize the internal field
           dataSourceTable: 'strutture',
-          pageLength: 20,
+          pageLength: 10,
           showHeader: true,
           fixedColumnsCount: 1,
           selectable: true,
@@ -17,13 +21,15 @@ class StruttureScreen extends StatefulWidget {
           initialSortBy: [SortColumn(column: 'nome', direction: SortDirection.asc)],
           uiModes: [UIMode.grid, UIMode.form, UIMode.map],
           formHookName: 'EditStrutturaForm',
-          // La callback onViewModeChanged può essere passata qui se HomeScreen
-          // ha bisogno di reagire ai cambi di UI mode del DBGridWidget.
-          // onViewModeChanged: (newMode) {
-          //   // Questa callback verrebbe chiamata da DBGridWidget
-          //   // HomeScreen potrebbe passarla qui per essere notificata
-          // }
         );
+
+  // Implement the getter for dbGridWidgetKey from DBGridProvider
+  @override
+  GlobalKey<State<DBGridWidget>> get dbGridWidgetKey => dbGridWidgetStateKey;
+
+  // Implement the getter for dbGridConfig from DBGridProvider
+  @override
+  DBGridConfig get dbGridConfig => _internalGridConfig; // Return the internal field
 
   @override
   State<StruttureScreen> createState() => _StruttureScreenState();
@@ -32,10 +38,11 @@ class StruttureScreen extends StatefulWidget {
 class _StruttureScreenState extends State<StruttureScreen> {
   @override
   Widget build(BuildContext context) {
-    // Accedi alla chiave e alla config tramite 'widget.' perché sono membri di StruttureScreen
+    // Access the key and config via 'widget.'
+    // Now widget.dbGridConfig correctly uses the getter.
     return DBGridWidget(
-      key: widget.dbGridWidgetStateKey, // Passa la chiave dal widget StruttureScreen
-      config: widget.gridConfig,
+      key: widget.dbGridWidgetKey, // Use the getter for the key
+      config: widget.dbGridConfig, // Use the getter for the config
     );
   }
 }

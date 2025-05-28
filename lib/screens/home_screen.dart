@@ -13,7 +13,6 @@ import 'package:una_social_app/helpers/logger_helper.dart';
 import 'package:una_social_app/models/personale.dart';
 import 'package:una_social_app/painters/star_painter.dart';
 import 'package:una_social_app/screens/personale_profile.dart';
-import 'package:una_social_app/screens/strutture_screen.dart';
 
 // Enum for profile menu actions
 enum ProfileAction { edit, logout, version }
@@ -62,30 +61,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Method to toggle the view state
   void _handleToggleView() {
-    appLogger.debug("HomeScreen - _handleToggleView: Tipo di widget.child: ${widget.child.runtimeType}");
+    appLogger.debug("HomeScreen - _handleToggleView: Child type: ${widget.child.runtimeType}");
 
-    if (widget.child is StruttureScreen) {
-      final struttureScreenWidget = widget.child as StruttureScreen;
-      // Ottieni lo State<DBGridWidget> tramite la chiave
-      final State<DBGridWidget>? actualState = struttureScreenWidget.dbGridWidgetStateKey.currentState;
+    if (widget.child is DBGridProvider) {
+      // Check for the interface
+      final dbGridProvider = widget.child as DBGridProvider;
+      final State<DBGridWidget>? actualState = dbGridProvider.dbGridWidgetKey.currentState;
 
       if (actualState != null && actualState is DBGridControl) {
-        // Controlla se lo stato implementa l'interfaccia
-        final dbGridControl = actualState as DBGridControl; // Fai il cast all'interfaccia
+        final dbGridControl = actualState as DBGridControl;
         dbGridControl.toggleUIModePublic();
-        appLogger.info("HomeScreen: Chiamato toggleUIModePublic() su DBGridControl.");
-        if (mounted) setState(() {}); // Forza rebuild per aggiornare l'icona
+        appLogger.info("HomeScreen: Called toggleUIModePublic() on DBGridControl via DBGridProvider.");
+        if (mounted) setState(() {}); // Rebuild to update icon/tooltip
       } else {
-        appLogger.warning("HomeScreen: Impossibile ottenere currentState o non è un DBGridControl.");
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Errore nel tentativo di cambiare vista (stato non trovato).")),
-        );
+        appLogger.warning("HomeScreen: Could not get DBGridControl from DBGridProvider's key.");
+        _showSnackbar(context, "Error trying to change view (control not found).", isError: true);
       }
     } else {
-      appLogger.info("HomeScreen: Toggle view button premuto, ma il child non è StruttureScreen.");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Cambio vista non applicabile a questa schermata.")),
-      );
+      appLogger.info("HomeScreen: Toggle view button pressed, but child is not a DBGridProvider.");
+      _showSnackbar(context, "View toggle not applicable to this screen.");
     }
   }
 
@@ -405,32 +399,53 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    bool shouldShowToggleViewButton = false;
-    IconData currentToggleIcon = Icons.view_quilt_outlined; // Default
-    String currentToggleTooltip = "Cambia vista";
+    bool shouldShowDbGridControls = false; // Unified flag for search and toggle
+    IconData currentToggleIcon = Icons.view_quilt_outlined; // Default icon
+    String currentToggleTooltip = "Cambia vista"; // Default tooltip
+    DBGridConfig? currentGridConfig;
+    DBGridControl? currentDbGridControl;
 
-    if (widget.child is StruttureScreen) {
-      final struttureScreenWidget = widget.child as StruttureScreen;
-      final config = struttureScreenWidget.gridConfig;
+    if (widget.child is DBGridProvider) {
+      final dbGridProvider = widget.child as DBGridProvider;
+      currentGridConfig = dbGridProvider.dbGridConfig; // Get config via interface
 
-      if (config.uiModes.length > 1) {
-        shouldShowToggleViewButton = true;
+      final State<DBGridWidget>? actualState = dbGridProvider.dbGridWidgetKey.currentState;
+      if (actualState != null && actualState is DBGridControl) {
+        currentDbGridControl = actualState as DBGridControl;
+      }
 
-        final State<DBGridWidget>? actualState = struttureScreenWidget.dbGridWidgetStateKey.currentState;
-        if (actualState != null && actualState is DBGridControl) {
-          final dbGridControl = actualState as DBGridControl;
-          final currentMode = dbGridControl.currentDisplayUIMode;
+      if (currentDbGridControl != null) {
+        shouldShowDbGridControls = true; // Show controls if we have both config and control
+
+        if (currentGridConfig.uiModes.length > 1) {
+          final currentMode = currentDbGridControl.currentDisplayUIMode;
           if (currentMode == UIMode.grid) {
-            currentToggleIcon = Icons.article_outlined;
+            currentToggleIcon = Icons.article_outlined; // Icon to switch to form
             currentToggleTooltip = "Passa a vista modulo";
           } else if (currentMode == UIMode.form) {
-            currentToggleIcon = Icons.grid_view_rounded;
-            currentToggleTooltip = "Passa a vista griglia";
+            currentToggleIcon = Icons.map_outlined; // Icon to switch to map (or next in cycle)
+            currentToggleTooltip = "Passa a vista mappa"; // Adjust if cycle is different
+            // Example: if map is last, go back to grid
+            int currentIndex = currentGridConfig.uiModes.indexOf(currentMode);
+            int nextIndex = (currentIndex + 1) % currentGridConfig.uiModes.length;
+            UIMode nextMode = currentGridConfig.uiModes[nextIndex];
+            if (nextMode == UIMode.grid) {
+              currentToggleIcon = Icons.grid_view_rounded;
+              currentToggleTooltip = "Passa a vista griglia";
+            } else if (nextMode == UIMode.form) {
+              currentToggleIcon = Icons.article_outlined;
+              currentToggleTooltip = "Passa a vista modulo";
+            } else if (nextMode == UIMode.map) {
+              currentToggleIcon = Icons.map_outlined;
+              currentToggleTooltip = "Passa a vista mappa";
+            }
           } else if (currentMode == UIMode.map) {
-            currentToggleIcon = Icons.map_outlined;
-            currentToggleTooltip = "Passa a vista mappa";
+            currentToggleIcon = Icons.grid_view_rounded; // Icon to switch to grid (or next)
+            currentToggleTooltip = "Passa a vista griglia";
           }
         }
+        // If uiModes.length <= 1, the toggle button itself won't be shown later,
+        // but shouldShowDbGridControls might still be true for the search bar.
       }
     }
 
@@ -478,28 +493,33 @@ class _HomeScreenState extends State<HomeScreen> {
                       maxLines: 1,
                     ),
                   ),
-                  // --- Search Bar ---
-                  searchBar,
+
+                  // Conditionally show Search Bar
+                  if (shouldShowDbGridControls) searchBar,
                   // --- Action Buttons ---
                   IconButton(
                     key: const Key('reloadButton'),
                     tooltip: "Ricarica Dati Utente",
                     icon: const Icon(Icons.refresh),
                     onPressed: () {
-                      if (widget.child is DBGridWidget) {
+                      if (currentDbGridControl != null) {
+                        currentDbGridControl.refreshData();
+                        logInfo("Refresh data for DBGrid triggered from HomeScreen.");
+                      } else {
+                        // Fallback or general reload if no DBGridControl
                         ctrl.reload();
-                        logInfo("Reload generale richiesto da HomeScreen");
+                        logInfo("General reload triggered from HomeScreen (no DBGridControl).");
                       }
                     }, // Call controller's reload method
                   ),
-                  if (shouldShowToggleViewButton)
+                  // Conditionally show Toggle View Button
+                  if (shouldShowDbGridControls && currentGridConfig != null && currentGridConfig.uiModes.length > 1)
                     IconButton(
                       key: const Key('toggleViewButton'),
-                      tooltip: currentToggleTooltip, // Aggiorna dinamicamente se possibile
-                      icon: Icon(currentToggleIcon), // Aggiorna dinamicamente se possibile
+                      tooltip: currentToggleTooltip,
+                      icon: Icon(currentToggleIcon),
                       onPressed: _handleToggleView,
-                    ), // Call toggle method
-
+                    ),
                   const SizedBox(width: 10),
 
                   // --- Profile Avatar and Menu ---

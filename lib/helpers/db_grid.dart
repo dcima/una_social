@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'; // Ensure this import is correct
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 import 'package:una_social_app/helpers/logger_helper.dart'; // Assuming logger_helper.dart exists
+import 'package:una_social_app/helpers/db_grid_form_view.dart'; // Import the new form view
 
 // --------------- ENUMS E CLASSI DI CONFIGURAZIONE ---------------
 enum SortDirection { asc, desc }
@@ -26,9 +27,10 @@ class DBGridConfig {
   final String emptyDataMessage;
   final List<SortColumn> initialSortBy;
   final List<UIMode> uiModes;
-  final String? formHookName;
+  final String? formHookName; // Still potentially useful for other actions
   final String? mapHookName;
   final Function(UIMode newMode)? onViewModeChanged;
+  final List<String> primaryKeyColumns; // For identifying PKs in the form view
 
   DBGridConfig({
     required this.dataSourceTable,
@@ -42,7 +44,14 @@ class DBGridConfig {
     this.formHookName,
     this.mapHookName,
     this.onViewModeChanged,
+    this.primaryKeyColumns = const ['id'], // Default to 'id'
   }) : assert(pageLength > 0, 'pageLength must be greater than 0');
+}
+
+// --------------- INTERFACE FOR SCREENS PROVIDING DBGRID ACCESS ---------------
+abstract class DBGridProvider {
+  DBGridConfig get dbGridConfig;
+  GlobalKey<State<DBGridWidget>> get dbGridWidgetKey;
 }
 
 // --------------- INTERFACCIA PUBBLICA DI CONTROLLO ---------------
@@ -50,6 +59,13 @@ abstract class DBGridControl {
   void toggleUIModePublic();
   UIMode get currentDisplayUIMode;
   void refreshData();
+  // Form navigation methods
+  bool canGoToPreviousRecordInForm();
+  bool canGoToNextRecordInForm();
+  void goToPreviousRecordInForm();
+  void goToNextRecordInForm();
+  Map<String, dynamic>? getCurrentRecordForForm();
+  List<String> getPrimaryKeyColumns();
 }
 
 // --------------- WIDGET BASE ASTRATTO ---------------
@@ -68,7 +84,7 @@ class DBGridWidget extends DBGridAbstractWidget {
 
 class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   late _DBGridDataSource _dataSource;
-  List<Map<String, dynamic>> _data = [];
+  List<Map<String, dynamic>> _data = []; // Data for the current grid page
   List<GridColumn> _columns = [];
   bool _isLoading = true;
   String _errorMessage = '';
@@ -80,6 +96,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   DataGridController _dataGridController = DataGridController();
   Map<String, DataGridSortDirection?> _sortedColumnsState = {};
   late UIMode _currentUIMode;
+  int _currentFormRecordIndex = -1; // Index of the current record being viewed in form mode within _data
 
   @override
   void initState() {
@@ -93,8 +110,25 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       onSelectionChanged: () {
         if (mounted) setState(() {});
       },
+      // Pass the areMapsEqual method for the datasource to use internally
+      areMapsEqualCallback: _areMapsEqual,
     );
     _fetchData(isRefresh: true);
+  }
+
+  // Centralized map comparison logic
+  bool _areMapsEqual(Map<String, dynamic> map1, Map<String, dynamic> map2) {
+    if (map1.containsKey('id') && map2.containsKey('id')) {
+      return map1['id'] == map2['id'];
+    }
+    // Fallback for maps without 'id' or for more robust comparison if needed
+    if (map1.length != map2.length) return false;
+    for (var key in map1.keys) {
+      if (!map2.containsKey(key) || map1[key] != map2[key]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _fetchData({bool isRefresh = false}) async {
@@ -102,6 +136,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
     if (isRefresh) {
       _currentPage = 0;
+      _currentFormRecordIndex = -1; // Reset form index on full refresh
     }
 
     setState(() {
@@ -117,13 +152,9 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       final limit = widget.config.pageLength;
       final offset = fromRecord;
 
-      // 1. Start with select(). This returns PostgrestQueryBuilder.
       var query = Supabase.instance.client.from(widget.config.dataSourceTable).select('*');
-
-      // 2. Apply range(). This transitions to PostgrestFilterBuilder.
       var rangedQuery = query.range(offset, offset + limit - 1);
 
-      // 3. Apply order() conditions to 'rangedQuery' BEFORE calling .count().
       _sortedColumnsState.forEach((columnName, direction) {
         if (direction != null) {
           rangedQuery = rangedQuery.order(
@@ -133,10 +164,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         }
       });
 
-      // 4. Apply count(). This transitions to a builder that, when awaited, yields PostgrestResponse.
       var builderForCount = rangedQuery.count(CountOption.exact);
-
-      // 5. Execute the query.
       final PostgrestResponse<PostgrestList> response = await builderForCount;
 
       if (!mounted) return;
@@ -175,13 +203,25 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         }
         _columns = _generateColumns(columnKeys);
       }
-      _dataSource.updateDataGridSource(_data);
+      _dataSource.updateDataGridSource(_data); // This will also update its internal copy of _data
+
+      // If form index was valid, try to maintain it if the record still exists
+      if (_currentFormRecordIndex != -1 && _currentFormRecordIndex < (response.data as List).length) {
+        // Potentially re-validate if the data changed significantly
+      } else if (_currentUIMode == UIMode.form && _data.isNotEmpty) {
+        _currentFormRecordIndex = 0; // Default to first record if in form mode and data loaded
+        _dataSource.clearSelections();
+        _dataSource.handleRowSelection(_data[_currentFormRecordIndex], isSelected: true);
+      } else {
+        _currentFormRecordIndex = -1;
+      }
     } catch (e, s) {
       if (mounted) {
         appLogger.error('Errore fetch data per ${widget.config.dataSourceTable}: $e', e, s);
         _errorMessage = 'Errore nel caricamento dati.';
         _totalRecords = 0;
         _data.clear();
+        _currentFormRecordIndex = -1;
         if (isRefresh || _columns.isEmpty) _columns.clear();
       }
     } finally {
@@ -196,8 +236,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
-// --------------- Rest of the _DBGridWidgetState class, unchanged from your "Copilot version" ---------------
-// Copy from _generateColumns down to the end of _DBGridWidgetState
   List<GridColumn> _generateColumns(List<String> columnNames) {
     List<GridColumn> cols = [];
     if (widget.config.selectable) {
@@ -254,7 +292,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       } else {
         newDirection = null;
       }
-
       _sortedColumnsState.clear();
       if (newDirection != null) {
         _sortedColumnsState[columnName] = newDirection;
@@ -282,10 +319,125 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
   @override
   void toggleUIModePublic() => _toggleUIMode();
+
+  void _toggleUIMode({Map<String, dynamic>? initialRecordForForm}) {
+    // Allow forcing to form mode if initialRecordForForm is provided and form mode is available
+    if (initialRecordForForm != null && widget.config.uiModes.contains(UIMode.form)) {
+      setState(() {
+        _currentUIMode = UIMode.form;
+        _setSelectedRecordForForm(initialRecordForForm);
+        widget.config.onViewModeChanged?.call(_currentUIMode);
+        appLogger.info("DBGridWidget: UI Mode forced to Form with initial record.");
+      });
+      return;
+    }
+
+    if (widget.config.uiModes.length <= 1) return;
+
+    setState(() {
+      int currentIndex = widget.config.uiModes.indexOf(_currentUIMode);
+      _currentUIMode = widget.config.uiModes[(currentIndex + 1) % widget.config.uiModes.length];
+      widget.config.onViewModeChanged?.call(_currentUIMode);
+      appLogger.info("DBGridWidget: UI Mode toggled to: $_currentUIMode");
+
+      if (_currentUIMode == UIMode.form) {
+        final selectedRecord = _dataSource.getSelectedDataForForm(); // Get last known selection
+        if (selectedRecord != null) {
+          _setSelectedRecordForForm(selectedRecord);
+        } else if (_data.isNotEmpty) {
+          _setSelectedRecordForForm(_data.first); // Default to first record on current page
+        } else {
+          // No data to show in form, might revert in build method
+          _currentFormRecordIndex = -1;
+          appLogger.info("DBGridWidget: Form Mode, but no record selected and no data available.");
+        }
+      } else {
+        _currentFormRecordIndex = -1; // Reset when leaving form mode
+      }
+    });
+  }
+
+  void _handleRowDoubleTap(DataGridCellDoubleTapDetails details) {
+    final rowIndex = details.rowColumnIndex.rowIndex;
+    if (rowIndex > 0) {
+      final dataIndex = rowIndex - 1;
+      if (dataIndex >= 0 && dataIndex < _data.length) {
+        final rowData = _data[dataIndex];
+        if (widget.config.uiModes.contains(UIMode.form)) {
+          _toggleUIMode(initialRecordForForm: rowData); // Switch to form mode with this record
+        } else if (widget.config.formHookName != null) {
+          // Fallback to old hook behavior if form mode is not an available UI Mode
+          _handleFormHook(rowData);
+        }
+      } else {
+        appLogger.warning("Double tap on invalid data row index: $dataIndex, _data.length: ${_data.length}");
+      }
+    } else {
+      appLogger.warning("Double tap on header ignored: rowIndex $rowIndex");
+    }
+  }
+
+  void _handleFormHook(Map<String, dynamic> recordData) {
+    appLogger.info("Trigger Form Hook: ${widget.config.formHookName} con dati: $recordData");
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Form Hook '${widget.config.formHookName}' chiamato per ID: ${recordData['id'] ?? 'N/D'}")));
+    }
+  }
+
+  void _setSelectedRecordForForm(Map<String, dynamic> recordData) {
+    _currentFormRecordIndex = _data.indexWhere((d) => _areMapsEqual(d, recordData));
+    _dataSource.clearSelections();
+    _dataSource.handleRowSelection(recordData, isSelected: true);
+    if (mounted) setState(() {});
+  }
+
   @override
   UIMode get currentDisplayUIMode => _currentUIMode;
   @override
   void refreshData() => _fetchData(isRefresh: true);
+
+  @override
+  Map<String, dynamic>? getCurrentRecordForForm() {
+    if (_currentFormRecordIndex >= 0 && _currentFormRecordIndex < _data.length) {
+      return _data[_currentFormRecordIndex];
+    }
+    return _dataSource.getSelectedDataForForm(); // Fallback
+  }
+
+  @override
+  List<String> getPrimaryKeyColumns() {
+    return widget.config.primaryKeyColumns;
+  }
+
+  @override
+  bool canGoToPreviousRecordInForm() {
+    return _currentFormRecordIndex > 0;
+  }
+
+  @override
+  bool canGoToNextRecordInForm() {
+    return _currentFormRecordIndex < _data.length - 1;
+  }
+
+  @override
+  void goToPreviousRecordInForm() {
+    if (canGoToPreviousRecordInForm()) {
+      setState(() {
+        _currentFormRecordIndex--;
+        _setSelectedRecordForForm(_data[_currentFormRecordIndex]);
+      });
+    }
+  }
+
+  @override
+  void goToNextRecordInForm() {
+    if (canGoToNextRecordInForm()) {
+      setState(() {
+        _currentFormRecordIndex++;
+        _setSelectedRecordForForm(_data[_currentFormRecordIndex]);
+      });
+    }
+  }
 
   void _goToPage(int pageIndex) {
     if (pageIndex >= 0 && (_totalPages == 0 || pageIndex < _totalPages) && pageIndex != _currentPage) {
@@ -313,48 +465,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
-  void _toggleUIMode() {
-    if (widget.config.uiModes.length <= 1) return;
-    setState(() {
-      int currentIndex = widget.config.uiModes.indexOf(_currentUIMode);
-      _currentUIMode = widget.config.uiModes[(currentIndex + 1) % widget.config.uiModes.length];
-      widget.config.onViewModeChanged?.call(_currentUIMode);
-      appLogger.info("DBGridWidget: UI Mode cambiata in: $_currentUIMode");
-      if (_currentUIMode == UIMode.form && widget.config.formHookName != null) {
-        final selected = _dataSource.getSelectedDataForForm();
-        if (selected != null) {
-          _handleFormHook(selected);
-        } else {
-          appLogger.info("DBGridWidget: Modo Form, ma nessun record singolo selezionato.");
-        }
-      }
-    });
-  }
-
-  void _handleRowDoubleTap(DataGridCellDoubleTapDetails details) {
-    if (widget.config.formHookName != null) {
-      final rowIndex = details.rowColumnIndex.rowIndex;
-      if (rowIndex > 0) {
-        final dataIndex = rowIndex - 1;
-        if (dataIndex >= 0 && dataIndex < _data.length) {
-          final rowData = _data[dataIndex];
-          _handleFormHook(rowData);
-        } else {
-          appLogger.warning("Double tap su riga con indice dati non valido: rowIndex $rowIndex, dataIndex $dataIndex, data.length ${_data.length}");
-        }
-      } else {
-        appLogger.warning("Double tap su header ignorato: rowIndex $rowIndex");
-      }
-    }
-  }
-
-  void _handleFormHook(Map<String, dynamic> recordData) {
-    appLogger.info("Trigger Form Hook: ${widget.config.formHookName} con dati: $recordData");
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Form Hook '${widget.config.formHookName}' chiamato per ID: ${recordData['id'] ?? 'N/D'}")));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoading && _totalRecords == 0 && _data.isEmpty) {
@@ -371,28 +481,22 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       case UIMode.grid:
         return _buildGridView();
       case UIMode.form:
-        final formData = _dataSource.getSelectedDataForForm();
-        if (formData != null && widget.config.formHookName != null) {
-          return Center(
-              child: Card(
-                  margin: const EdgeInsets.all(16),
-                  child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Text("Vista Modulo per: ${formData['nome'] ?? formData['id'] ?? 'Record'}", style: Theme.of(context).textTheme.titleLarge),
-                        const SizedBox(height: 10),
-                        Text("ID: ${formData['id'] ?? 'N/D'}"),
-                        const SizedBox(height: 20),
-                        ElevatedButton(onPressed: _toggleUIMode, child: const Text("Torna alla Griglia"))
-                      ]))));
+        final Map<String, dynamic>? formData = getCurrentRecordForForm();
+        if (formData != null) {
+          return DBGridFormView(
+            formData: formData,
+            dbGridControl: this,
+            primaryKeyColumns: getPrimaryKeyColumns(),
+          );
         }
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _currentUIMode == UIMode.form) {
+            appLogger.warning("DBGridWidget: In Form Mode ma nessun record valido. Ritorno alla griglia.");
             setState(() {
               _currentUIMode = widget.config.uiModes.firstWhereOrNull((m) => m == UIMode.grid) ?? widget.config.uiModes.first;
               widget.config.onViewModeChanged?.call(_currentUIMode);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Nessun record selezionato per il modulo. Visualizzazione Griglia.")));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Nessun record selezionato per il modulo. Visualizzazione Griglia.")));
               }
             });
           }
@@ -416,39 +520,16 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       }
       return const SizedBox.shrink();
     }
-
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          IconButton(
-            icon: const Icon(Icons.first_page),
-            onPressed: _isLoading || _currentPage == 0 ? null : () => _goToPage(0),
-            tooltip: "Prima pagina",
-          ),
-          IconButton(
-            icon: const Icon(Icons.navigate_before),
-            onPressed: _isLoading || _currentPage == 0 ? null : _previousPage,
-            tooltip: "Pagina precedente",
-          ),
-          Expanded(
-            child: Text(
-              _totalPages > 0 ? 'Pag. ${_currentPage + 1} di $_totalPages ($_totalRecords record)' : (_isLoading ? 'Caricamento...' : '0 record'),
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.navigate_next),
-            onPressed: _isLoading || _currentPage >= _totalPages - 1 ? null : _nextPage,
-            tooltip: "Pagina successiva",
-          ),
-          IconButton(
-            icon: const Icon(Icons.last_page),
-            onPressed: _isLoading || _currentPage >= _totalPages - 1 || _totalPages == 0 ? null : () => _goToPage(_totalPages - 1),
-            tooltip: "Ultima pagina",
-          ),
+          IconButton(icon: const Icon(Icons.first_page), onPressed: _isLoading || _currentPage == 0 ? null : () => _goToPage(0), tooltip: "Prima pagina"),
+          IconButton(icon: const Icon(Icons.navigate_before), onPressed: _isLoading || _currentPage == 0 ? null : _previousPage, tooltip: "Pagina precedente"),
+          Expanded(child: Text('Pag. ${_currentPage + 1} di $_totalPages ($_totalRecords record)', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
+          IconButton(icon: const Icon(Icons.navigate_next), onPressed: _isLoading || _currentPage >= _totalPages - 1 ? null : _nextPage, tooltip: "Pagina successiva"),
+          IconButton(icon: const Icon(Icons.last_page), onPressed: _isLoading || _currentPage >= _totalPages - 1 || _totalPages == 0 ? null : () => _goToPage(_totalPages - 1), tooltip: "Ultima pagina"),
         ],
       ),
     );
@@ -462,7 +543,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     if (_columns.isEmpty && (_isLoading || _totalRecords > 0)) {
       return const Center(child: CircularProgressIndicator());
     }
-
     return Column(children: [
       if (widget.config.uiModes.length > 1)
         Padding(
@@ -490,19 +570,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
               selected: <UIMode>{_currentUIMode},
               onSelectionChanged: (Set<UIMode> newSelection) {
                 if (newSelection.isNotEmpty && newSelection.first != _currentUIMode) {
-                  setState(() {
-                    _currentUIMode = newSelection.first;
-                    widget.config.onViewModeChanged?.call(_currentUIMode);
-                    appLogger.info("DBGridWidget: UI Mode cambiata in: $_currentUIMode (via SegmentedButton)");
-                    if (_currentUIMode == UIMode.form && widget.config.formHookName != null) {
-                      final selected = _dataSource.getSelectedDataForForm();
-                      if (selected != null) {
-                        _handleFormHook(selected);
-                      } else {
-                        appLogger.info("DBGridWidget: Modo Form (via SegmentedButton), ma nessun record singolo selezionato.");
-                      }
-                    }
-                  });
+                  _toggleUIMode(initialRecordForForm: newSelection.first == UIMode.form ? _dataSource.getSelectedDataForForm() ?? (_data.isNotEmpty ? _data.first : null) : null);
                 }
               },
             )),
@@ -533,26 +601,28 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       _buildPaginationControls(),
     ]);
   }
-} // End of _DBGridWidgetState
+}
 
-// --------------- DATASOURCE PER SfDataGrid (_DBGridDataSource class and extensions remain unchanged)---------------
-// Copy the _DBGridDataSource class and IterableExtensions from your "Copilot version" here.
+// --------------- DATASOURCE PER SfDataGrid ---------------
 class _DBGridDataSource extends DataGridSource {
   List<Map<String, dynamic>> _gridDataInternal = [];
   final DataGridRow Function(Map<String, dynamic>, int) _buildRowCallback;
   List<Map<String, dynamic>> _selectedRowsDataMap = [];
   List<DataGridRow> _dataGridRows = [];
   final VoidCallback _onSelectionChanged;
+  final bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) _areMapsEqualCallback;
 
   _DBGridDataSource({
     required List<Map<String, dynamic>> gridData,
     required DataGridRow Function(Map<String, dynamic>, int) buildRowCallback,
     required List<Map<String, dynamic>> selectedRowsDataMap,
     required VoidCallback onSelectionChanged,
+    required bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) areMapsEqualCallback,
   })  : _gridDataInternal = gridData,
         _buildRowCallback = buildRowCallback,
         _selectedRowsDataMap = selectedRowsDataMap,
-        _onSelectionChanged = onSelectionChanged {
+        _onSelectionChanged = onSelectionChanged,
+        _areMapsEqualCallback = areMapsEqualCallback {
     _buildDataGridRows();
   }
 
@@ -563,6 +633,10 @@ class _DBGridDataSource extends DataGridSource {
     _dataGridRows = _gridDataInternal.asMap().entries.map((entry) => _buildRowCallback(entry.value, entry.key)).toList();
   }
 
+  bool areMapsEqual(Map<String, dynamic> map1, Map<String, dynamic> map2) {
+    return _areMapsEqualCallback(map1, map2);
+  }
+
   @override
   DataGridRowAdapter buildRow(DataGridRow row) {
     final int dataGridRowIndex = _dataGridRows.indexOf(row);
@@ -571,12 +645,15 @@ class _DBGridDataSource extends DataGridSource {
       originalData = _gridDataInternal[dataGridRowIndex];
     }
 
-    final bool isSelected = originalData != null && _selectedRowsDataMap.any((item) => _areMapsEqual(item, originalData!));
+    final bool isSelected = originalData != null && _selectedRowsDataMap.any((item) => _areMapsEqualCallback(item, originalData!));
 
     Color? rowColor;
-    final currentContext = NavigationService.navigatorKey.currentContext;
-    if (isSelected && currentContext != null) {
-      rowColor = Theme.of(currentContext).highlightColor.withAlpha((0.3 * 255).round());
+    if (NavigationService.navigatorKey.currentContext != null) {
+      // Check context
+      final currentContext = NavigationService.navigatorKey.currentContext!;
+      if (isSelected) {
+        rowColor = Theme.of(currentContext).highlightColor.withAlpha((0.3 * 255).round());
+      }
     }
 
     return DataGridRowAdapter(
@@ -594,23 +671,10 @@ class _DBGridDataSource extends DataGridSource {
         }).toList());
   }
 
-  bool _areMapsEqual(Map<String, dynamic> map1, Map<String, dynamic> map2) {
-    if (map1.containsKey('id') && map2.containsKey('id')) {
-      return map1['id'] == map2['id'];
-    }
-    if (map1.length != map2.length) return false;
-    for (var key in map1.keys) {
-      if (!map2.containsKey(key) || map1[key] != map2[key]) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   void updateDataGridSource(List<Map<String, dynamic>> newData) {
     _gridDataInternal = newData;
     _buildDataGridRows();
-    _selectedRowsDataMap.removeWhere((selectedItem) => !_gridDataInternal.any((newItem) => _areMapsEqual(selectedItem, newItem)));
+    _selectedRowsDataMap.removeWhere((selectedItem) => !_gridDataInternal.any((newItem) => _areMapsEqualCallback(selectedItem, newItem)));
     notifyListeners();
     _onSelectionChanged();
   }
@@ -618,7 +682,7 @@ class _DBGridDataSource extends DataGridSource {
   bool isAllSelected() {
     if (_gridDataInternal.isEmpty) return false;
     for (var item in _gridDataInternal) {
-      if (!_selectedRowsDataMap.any((selected) => _areMapsEqual(selected, item))) return false;
+      if (!_selectedRowsDataMap.any((selected) => _areMapsEqualCallback(selected, item))) return false;
     }
     return _gridDataInternal.isNotEmpty;
   }
@@ -626,25 +690,25 @@ class _DBGridDataSource extends DataGridSource {
   void selectAllRows(bool select) {
     if (select) {
       for (var item in _gridDataInternal) {
-        if (!_selectedRowsDataMap.any((selected) => _areMapsEqual(selected, item))) {
+        if (!_selectedRowsDataMap.any((selected) => _areMapsEqualCallback(selected, item))) {
           _selectedRowsDataMap.add(Map.from(item));
         }
       }
     } else {
-      _selectedRowsDataMap.removeWhere((selectedItem) => _gridDataInternal.any((itemOnPage) => _areMapsEqual(selectedItem, itemOnPage)));
+      _selectedRowsDataMap.removeWhere((selectedItem) => _gridDataInternal.any((itemOnPage) => _areMapsEqualCallback(selectedItem, itemOnPage)));
     }
     notifyListeners();
     _onSelectionChanged();
   }
 
   void handleRowSelection(Map<String, dynamic> rowData, {bool? isSelected}) {
-    final bool currentlySelected = _selectedRowsDataMap.any((item) => _areMapsEqual(item, rowData));
+    final bool currentlySelected = _selectedRowsDataMap.any((item) => _areMapsEqualCallback(item, rowData));
     final bool shouldBeSelected = isSelected ?? !currentlySelected;
 
     if (shouldBeSelected) {
       if (!currentlySelected) _selectedRowsDataMap.add(Map.from(rowData));
     } else {
-      _selectedRowsDataMap.removeWhere((item) => _areMapsEqual(item, rowData));
+      _selectedRowsDataMap.removeWhere((item) => _areMapsEqualCallback(item, rowData));
     }
     notifyListeners();
     _onSelectionChanged();
@@ -665,6 +729,7 @@ class _DBGridDataSource extends DataGridSource {
 }
 
 class NavigationService {
+  // Ensure this is correctly set up in your app
   static GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 }
 
