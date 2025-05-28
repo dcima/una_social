@@ -387,6 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
         constraints: const BoxConstraints(maxWidth: 250), // Max width for search
         padding: const EdgeInsets.symmetric(horizontal: 8.0),
         child: TextField(
+          key: const Key('searchField'),
           style: const TextStyle(fontSize: 14),
           decoration: InputDecoration(
             contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 8),

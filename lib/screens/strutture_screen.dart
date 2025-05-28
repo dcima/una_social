@@ -1,15 +1,9 @@
 // lib/screens/strutture_screen.dart
 import 'package:flutter/material.dart';
-// Aggiorna il percorso se hai spostato db_grid.dart
 import 'package:una_social_app/helpers/db_grid.dart';
-// import 'package:una_social_app/widgets/db_grid/db_grid.dart'; // Se è in widgets/db_grid/
 
 class StruttureScreen extends StatefulWidget {
-  // La GlobalKey è un membro del Widget StruttureScreen
   final GlobalKey<State<DBGridWidget>> dbGridWidgetStateKey = GlobalKey<State<DBGridWidget>>();
-
-  // La config è anche un membro del Widget StruttureScreen,
-  // così HomeScreen può leggerla direttamente.
   final DBGridConfig gridConfig;
 
   StruttureScreen({super.key})
