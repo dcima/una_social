@@ -302,9 +302,12 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(8.0),
             child: Builder(
               builder: (BuildContext drawerContext) {
+                // LA Column ora ha una parte fissa sopra, una scrollabile in mezzo, e una fissa sotto
                 return Column(
+                  key: const Key('drawerColumn'), // Manteniamo la key se serve per i test
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    // --- PARTE FISSA SUPERIORE ---
                     SizedBox(
                       width: starGraphicSize,
                       height: starGraphicSize,
@@ -324,38 +327,169 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 8),
                     const Divider(),
                     const SizedBox(height: 8),
-                    ListTile(
-                      leading: const Icon(Icons.home_outlined, color: primaryBlue),
-                      title: const Text('Home'),
-                      onTap: () {
-                        Navigator.pop(drawerContext);
-                        GoRouter.of(drawerContext).go('/home');
-                      },
+                    // --- FINE PARTE FISSA SUPERIORE ---
+
+                    // --- PARTE SCROLLABILE CENTRALE ---
+                    Expanded(
+                      child: ListView(
+                        padding: EdgeInsets.zero, // Rimuove eventuale padding di default della ListView
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.home_outlined, color: primaryBlue),
+                            title: const Text('Home'),
+                            onTap: () {
+                              Navigator.pop(drawerContext);
+                              GoRouter.of(drawerContext).go('/home');
+                            },
+                          ),
+                          ExpansionTile(
+                            childrenPadding: const EdgeInsets.only(left: 15.0),
+                            leading: const Icon(Icons.chat, color: primaryBlue),
+                            title: const Text('Chat', style: TextStyle(color: primaryBlue)),
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.phone, color: primaryBlue),
+                                title: const Text('Chiamate'),
+                                onTap: () {
+                                  Navigator.pop(drawerContext);
+                                  GoRouter.of(drawerContext).push('/chat_chiamate');
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.donut_large_outlined, color: primaryBlue), // Era Icons.donut_large
+                                title: const Text('Stato'),
+                                onTap: () {
+                                  Navigator.pop(drawerContext);
+                                  GoRouter.of(drawerContext).push('/chat_stato');
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.star, color: primaryBlue),
+                                title: const Text('Messaggi importanti'),
+                                onTap: () {
+                                  Navigator.pop(drawerContext);
+                                  GoRouter.of(drawerContext).push('/chat_importanti');
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.archive, color: primaryBlue),
+                                title: const Text('Chat archiviate'),
+                                onTap: () {
+                                  Navigator.pop(drawerContext);
+                                  GoRouter.of(drawerContext).push('/chat_archiviate');
+                                },
+                              ),
+                              ExpansionTile(
+                                childrenPadding: const EdgeInsets.only(left: 15.0),
+                                title: const Text('Impostazioni', style: TextStyle(color: primaryBlue)),
+                                leading: const Icon(Icons.settings, color: primaryBlue),
+                                children: [
+                                  ListTile(
+                                    leading: const Icon(Icons.tune, color: Colors.deepPurple),
+                                    title: const Text('Generale'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_generale');
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.key, color: Colors.deepPurple),
+                                    title: const Text('Account'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_account');
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.chat_bubble, color: Colors.deepPurple),
+                                    title: const Text('Chat'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_chat');
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.videocam, color: Colors.deepPurple),
+                                    title: const Text('Video e audio'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_video_audio');
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.notifications, color: Colors.deepPurple),
+                                    title: const Text('Notifiche'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_notifiche');
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.brush, color: Colors.deepPurple),
+                                    title: const Text('Personalizzazione'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_personalizzazione');
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.archive, color: Colors.deepPurple),
+                                    title: const Text('Archiviazione'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_archiviazione');
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.keyboard, color: Colors.deepPurple),
+                                    title: const Text('Collegamenti rapidi'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_collegamenti_rapidi');
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(Icons.info, color: Colors.deepPurple),
+                                    title: const Text('Aiuto'),
+                                    onTap: () {
+                                      Navigator.pop(drawerContext);
+                                      GoRouter.of(drawerContext).push('/chat_settings_aiuto');
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          ExpansionTile(
+                            childrenPadding: const EdgeInsets.only(left: 15.0),
+                            leading: const Icon(Icons.build, color: primaryBlue),
+                            title: const Text('Sistema', style: TextStyle(color: primaryBlue)),
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.business_center, color: Colors.deepPurple),
+                                title: const Text('Strutture'),
+                                onTap: () {
+                                  Navigator.pop(drawerContext);
+                                  GoRouter.of(drawerContext).push('/strutture');
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.storage_rounded, color: Colors.deepPurple),
+                                title: const Text('Database'),
+                                onTap: () {
+                                  Navigator.pop(drawerContext);
+                                  GoRouter.of(drawerContext).push('/database');
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                    ExpansionTile(
-                      childrenPadding: EdgeInsets.only(left: 15.0),
-                      leading: Icon(Icons.build, color: primaryBlue),
-                      title: const Text('Sistema', style: TextStyle(color: primaryBlue)),
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.business_center, color: primaryBlue),
-                          title: const Text('Strutture'),
-                          onTap: () {
-                            Navigator.pop(drawerContext);
-                            GoRouter.of(drawerContext).push('/strutture');
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.storage_rounded, color: primaryBlue),
-                          title: const Text('Database'),
-                          onTap: () {
-                            Navigator.pop(drawerContext);
-                            GoRouter.of(drawerContext).push('/database');
-                          },
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
+                    // --- FINE PARTE SCROLLABILE CENTRALE ---
+
+                    // --- PARTE FISSA INFERIORE ---
+                    // Lo Spacer è stato rimosso perché Expanded occupa lo spazio disponibile.
                     const Divider(),
                     ListTile(
                       leading: const Icon(Icons.info_outline, color: Colors.grey),
@@ -363,12 +497,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: () {
                         Navigator.pop(drawerContext);
                         showAboutDialog(
-                          context: context,
+                          context: context, // Usa il context principale
                           applicationName: 'Una Social',
                           applicationVersion: ctrl.appVersion.value.isNotEmpty ? ctrl.appVersion.value : 'N/A',
                         );
                       },
                     ),
+                    // --- FINE PARTE FISSA INFERIORE ---
                   ],
                 );
               },
