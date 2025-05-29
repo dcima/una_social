@@ -332,7 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             title: const Text('Home'),
                             onTap: () {
                               Navigator.pop(drawerContext);
-                              GoRouter.of(drawerContext).go('/home');
+                              GoRouter.of(drawerContext).go('home');
                             },
                           ),
                           ExpansionTile(
@@ -343,7 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               navContext: drawerContext,
                               icon: Icons.chat,
                               title: 'Una Chat',
-                              routePath: '/una_chat',
+                              routePath: '/app/una_chat',
                               controller: chatExpansionController,
                               titleStyle: const TextStyle(color: primaryBlue),
                             ),
@@ -354,7 +354,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: const Text('Chiamate'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/una_chat_chiamate');
+                                  GoRouter.of(drawerContext).push('una_chat_chiamate');
                                 },
                               ),
                               ListTile(
@@ -362,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: const Text('Stato'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/una_chat_stato');
+                                  GoRouter.of(drawerContext).push('una_chat_stato');
                                 },
                               ),
                               ListTile(
@@ -370,7 +370,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: const Text('Messaggi importanti'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/una_chat_importanti');
+                                  GoRouter.of(drawerContext).push('una_chat_importanti');
                                 },
                               ),
                               ListTile(
@@ -378,7 +378,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: const Text('Chat archiviate'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/una_chat_archiviate');
+                                  GoRouter.of(drawerContext).push('una_chat_archiviate');
                                 },
                               ),
                               ExpansionTile(
@@ -389,7 +389,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   navContext: drawerContext,
                                   icon: Icons.settings,
                                   title: 'Impostazioni',
-                                  routePath: '/una_chat_settings',
+                                  routePath: 'una_chat_settings',
                                   controller: chatSettingsExpansionController,
                                   titleStyle: const TextStyle(color: primaryBlue),
                                 ),
@@ -399,7 +399,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Generale'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/un_chat_settings_generale');
+                                      GoRouter.of(drawerContext).push('un_chat_settings_generale');
                                     },
                                   ),
                                   ListTile(
@@ -407,7 +407,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Account'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/una_chat_settings_account');
+                                      GoRouter.of(drawerContext).push('una_chat_settings_account');
                                     },
                                   ),
                                   ListTile(
@@ -415,7 +415,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Chat (opzioni)'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/una_chat_settings_chat');
+                                      GoRouter.of(drawerContext).push('una_chat_settings_chat');
                                     },
                                   ),
                                   ListTile(
@@ -423,7 +423,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Video e audio'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/una_chat_settings_video_audio');
+                                      GoRouter.of(drawerContext).push('una_chat_settings_video_audio');
                                     },
                                   ),
                                   ListTile(
@@ -431,7 +431,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Notifiche'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/una_chat_settings_notifiche');
+                                      GoRouter.of(drawerContext).push('una_chat_settings_notifiche');
                                     },
                                   ),
                                   ListTile(
@@ -439,7 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Personalizzazione'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/una_chat_settings_personalizzazione');
+                                      GoRouter.of(drawerContext).push('una_chat_settings_personalizzazione');
                                     },
                                   ),
                                   ListTile(
@@ -455,7 +455,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Collegamenti rapidi'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/una_chat_settings_collegamenti_rapidi');
+                                      GoRouter.of(drawerContext).push('una_chat_settings_collegamenti_rapidi');
                                     },
                                   ),
                                   ListTile(
@@ -463,7 +463,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Aiuto'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/una_chat_settings_aiuto');
+                                      GoRouter.of(drawerContext).push('una_chat_settings_aiuto');
                                     },
                                   ),
                                 ],
@@ -480,7 +480,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: const Text('Strutture'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/strutture');
+                                  GoRouter.of(drawerContext).push('/app/strutture');
                                 },
                               ),
                               ListTile(
@@ -488,7 +488,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: const Text('Database'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/database');
+                                  GoRouter.of(drawerContext).push('/app/database');
                                 },
                               ),
                             ],
