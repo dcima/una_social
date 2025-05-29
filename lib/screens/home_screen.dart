@@ -592,21 +592,30 @@ class _HomeScreenState extends State<HomeScreen> {
                                 break;
                               case ProfileAction.logout:
                                 AuthHelper.setLogoutReason(LogoutReason.userInitiated);
-                                logInfo("[HomeScreen] Logout: ProfileAction.logout selected. Scheduling signOut after current frame.");
+                                logInfo("[HomeScreen] Logout: ProfileAction.logout selected. Scheduling signOut after current frame and a tiny delay.");
 
                                 WidgetsBinding.instance.addPostFrameCallback((_) {
                                   if (mounted) {
-                                    logInfo("[HomeScreen] Logout: Executing signOut from addPostFrameCallback. Widget is mounted.");
-                                    Supabase.instance.client.auth.signOut().then((_) {
-                                      logInfo("[HomeScreen] Logout: signOut Future completed (listeners will handle navigation/state).");
-                                    }).catchError((error, stackTrace) {
-                                      logInfo("[HomeScreen] Logout: Error during signOut in addPostFrameCallback: $error\nStack: $stackTrace");
+                                    // Add a very short delay to allow the UI to settle even more
+                                    Future.delayed(const Duration(milliseconds: 50), () {
+                                      // Try values like 20, 50, or 100
                                       if (mounted) {
-                                        AuthHelper.clearLastLogoutReason();
+                                        // Check mounted again after the delay
+                                        logInfo("[HomeScreen] Logout: Executing signOut from addPostFrameCallback after additional delay. Widget is mounted.");
+                                        Supabase.instance.client.auth.signOut().then((_) {
+                                          logInfo("[HomeScreen] Logout: signOut Future completed (listeners will handle navigation/state).");
+                                        }).catchError((error, stackTrace) {
+                                          logInfo("[HomeScreen] Logout: Error during signOut in addPostFrameCallback: $error\nStack: $stackTrace");
+                                          if (mounted) {
+                                            AuthHelper.clearLastLogoutReason();
+                                          }
+                                        });
+                                      } else {
+                                        logInfo("[HomeScreen] Logout: Widget was unmounted before delayed signOut could execute.");
                                       }
                                     });
                                   } else {
-                                    logInfo("[HomeScreen] Logout: Widget was unmounted before signOut in addPostFrameCallback could execute.");
+                                    logInfo("[HomeScreen] Logout: Widget was unmounted before addPostFrameCallback's inner logic could execute.");
                                   }
                                 });
                                 break;
