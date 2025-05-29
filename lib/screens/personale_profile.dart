@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart'; // Per GetUtils.isEmail
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social_app/controllers/personale_controller.dart';
-import 'package:una_social_app/models/personale.dart';
+import 'package:una_social/controllers/personale_controller.dart';
+import 'package:una_social/models/personale.dart';
 
 // Helper per email e telefoni (tag/valore, ma le chiavi sono 't' e 'v')
 class ContactEntryItem {

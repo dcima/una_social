@@ -7,8 +7,8 @@ import 'package:get/get_rx/src/rx_types/rx_types.dart';
 import 'package:get/get_state_manager/src/simple/get_controllers.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social_app/helpers/logger_helper.dart';
-import 'package:una_social_app/models/personale.dart';
+import 'package:una_social/helpers/logger_helper.dart';
+import 'package:una_social/models/personale.dart';
 // È buona pratica importare i tipi specifici se li si usa esplicitamente,
 // anche se supabase_flutter potrebbe riesportarli.
 // Ad esempio, se si fa riferimento a `Presence` nel codice:

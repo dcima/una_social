@@ -5,9 +5,9 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart'; // *** Importa GetX ***
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social_app/app_router.dart';
-import 'package:una_social_app/controllers/auth_controller.dart'; // *** Importa AuthController ***
-import 'package:una_social_app/helpers/logger_helper.dart'; // Importa il logger
+import 'package:una_social/app_router.dart';
+import 'package:una_social/controllers/auth_controller.dart'; // *** Importa AuthController ***
+import 'package:una_social/helpers/logger_helper.dart'; // Importa il logger
 
 // --- ValueNotifier Globale RIMOSSO ---
 // final ValueNotifier<AuthStatus> appAuthStatusNotifier = ValueNotifier(AuthStatus.loading);

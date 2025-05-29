@@ -1,7 +1,7 @@
 // lib/helpers/db_grid_form_view.dart
 import 'package:flutter/material.dart';
-import 'package:una_social_app/helpers/db_grid.dart';
-import 'package:una_social_app/helpers/logger_helper.dart'; // For DBGridControl and UIMode
+import 'package:una_social/helpers/db_grid.dart';
+import 'package:una_social/helpers/logger_helper.dart'; // For DBGridControl and UIMode
 
 class DBGridFormView extends StatelessWidget {
   final Map<String, dynamic> formData;

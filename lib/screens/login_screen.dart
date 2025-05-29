@@ -5,8 +5,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Per FilteringTextInputFormatter
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social_app/helpers/auth_helper.dart'; // Importa l'helper
-import 'package:una_social_app/helpers/snackbar_helper.dart'; // Per la Snackbar
+import 'package:una_social/helpers/auth_helper.dart'; // Importa l'helper
+import 'package:una_social/helpers/snackbar_helper.dart'; // Per la Snackbar
 
 final supabase = Supabase.instance.client;
 

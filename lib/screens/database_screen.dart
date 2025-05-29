@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:csv/csv.dart'; // For CSV generation
 import 'package:file_saver/file_saver.dart';
-import 'package:una_social_app/helpers/snackbar_helper.dart'; // Importa l'helper Snackbar
+import 'package:una_social/helpers/snackbar_helper.dart'; // Importa l'helper Snackbar
 
 // Enum for export formats
 enum ExportFormat { csv, sql, json }

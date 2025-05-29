@@ -4,8 +4,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'; // Ensure this import is correct
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
-import 'package:una_social_app/helpers/logger_helper.dart'; // Assuming logger_helper.dart exists
-import 'package:una_social_app/helpers/db_grid_form_view.dart'; // Import the new form view
+import 'package:una_social/helpers/logger_helper.dart'; // Assuming logger_helper.dart exists
+import 'package:una_social/helpers/db_grid_form_view.dart'; // Import the new form view
 
 // --------------- ENUMS E CLASSI DI CONFIGURAZIONE ---------------
 enum SortDirection { asc, desc }

@@ -6,13 +6,13 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social_app/controllers/personale_controller.dart';
-import 'package:una_social_app/helpers/auth_helper.dart';
-import 'package:una_social_app/helpers/db_grid.dart';
-import 'package:una_social_app/helpers/logger_helper.dart';
-import 'package:una_social_app/models/personale.dart';
-import 'package:una_social_app/painters/star_painter.dart';
-import 'package:una_social_app/screens/personale_profile.dart';
+import 'package:una_social/controllers/personale_controller.dart';
+import 'package:una_social/helpers/auth_helper.dart';
+import 'package:una_social/helpers/db_grid.dart';
+import 'package:una_social/helpers/logger_helper.dart';
+import 'package:una_social/models/personale.dart';
+import 'package:una_social/painters/star_painter.dart';
+import 'package:una_social/screens/personale_profile.dart';
 
 // Enum for profile menu actions
 enum ProfileAction { edit, logout, version }
@@ -40,10 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _appVersion = 'Caricamento...';
   String _buildNumber = '';
 
-  // Initialize GetX Controller
   final PersonaleController ctrl = Get.put(PersonaleController());
-  // State for toggling grid/list view (if applicable to child)
-  //bool gridView = false;
 
   @override
   void initState() {
@@ -61,12 +58,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Method to toggle the view state
   void _handleToggleView() {
     appLogger.debug("HomeScreen - _handleToggleView: Child type: ${widget.child.runtimeType}");
 
     if (widget.child is DBGridProvider) {
-      // Check for the interface
       final dbGridProvider = widget.child as DBGridProvider;
       final State<DBGridWidget>? actualState = dbGridProvider.dbGridWidgetKey.currentState;
 
@@ -74,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final dbGridControl = actualState as DBGridControl;
         dbGridControl.toggleUIModePublic();
         appLogger.info("HomeScreen: Called toggleUIModePublic() on DBGridControl via DBGridProvider.");
-        if (mounted) setState(() {}); // Rebuild to update icon/tooltip
+        if (mounted) setState(() {});
       } else {
         appLogger.warning("HomeScreen: Could not get DBGridControl from DBGridProvider's key.");
         _showSnackbar(context, "Error trying to change view (control not found).", isError: true);
@@ -85,11 +80,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- Helper function to show the version view dialog ---
   void _showVersionDialog(BuildContext context, String value) {
     String displayVersion = 'Versione: $_appVersion';
     if (_buildNumber.isNotEmpty && _buildNumber != "0") {
-      // "0" è il default se non c'è +X
       displayVersion += '+$_buildNumber';
     }
     showDialog(
@@ -112,7 +105,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- Helper function to show the profile editing dialog ---
   void _showProfileDialog(BuildContext context, Personale currentUser) {
     showDialog(
       context: context,
@@ -131,7 +123,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- Helper function to show snackbars safely after build ---
   void _showSnackbar(BuildContext ctx, String message, {bool isError = false}) {
     if (!ctx.mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -147,28 +138,23 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // --- Helper function to generate the Supabase signed URL ---
   Future<String?> _getSignedAvatarUrl(Personale? currentUserFromDb, String authUserEmail, String controllerMessage) async {
     const String bucketName = 'una-bucket';
     const int expiresIn = 86400 * 365 * 50; // 50 years
     final supabase = Supabase.instance.client;
 
-    // Scenario 1: currentUserFromDb (from 'personale' table) exists
     if (currentUserFromDb != null) {
-      // 1a: It has a direct, usable photoUrl
       if (currentUserFromDb.photoUrl != null && currentUserFromDb.photoUrl!.isNotEmpty) {
         logInfo("HomeScreen - _getSignedAvatarUrl: Using existing photoUrl from Personale object: ${currentUserFromDb.photoUrl}");
         return currentUserFromDb.photoUrl;
       }
-
-      // 1b: Generate signed URL from 'personale/foto/'
       logInfo("HomeScreen: _getSignedAvatarUrl: Generating signed URL for ${currentUserFromDb.nome} ${currentUserFromDb.cognome} (ID: ${currentUserFromDb.id}) from 'personale/foto/' path.");
       final ente = currentUserFromDb.ente;
       final id = currentUserFromDb.id;
 
       if (ente.isEmpty || id <= 0) {
         logInfo("HomeScreen - _getSignedAvatarUrl: Insufficient data (ente or id missing in Personale object) for 'personale/foto/' path.");
-        return null; // Cannot form path
+        return null;
       }
       final String imagePath = 'personale/foto/${ente}_$id.jpg';
 
@@ -183,24 +169,17 @@ class _HomeScreenState extends State<HomeScreen> {
         logInfo("HomeScreen - _getSignedAvatarUrl: Unexpected error for 'personale/foto/$imagePath': $e\nStackTrace: $stackTrace");
         return null;
       }
-    }
-    // Scenario 2: currentUserFromDb is null (no record in 'personale' table)
-    else {
+    } else {
       logInfo("HomeScreen - _getSignedAvatarUrl: currentUserFromDb is null.");
-      // Check if the reason is "Profilo personale non trovato."
       if (controllerMessage == 'Profilo personale non trovato.') {
         logInfo("HomeScreen - _getSignedAvatarUrl: Controller message indicates 'Profilo personale non trovato.' Attempting to load from 'esterni/foto/' for email: $authUserEmail");
-
         if (authUserEmail.isEmpty) {
           logInfo("HomeScreen - _getSignedAvatarUrl: Auth user email is empty, cannot form 'esterni/foto/' path.");
           return null;
         }
-
-        // Ensure email is a valid path component (basic sanitization might be needed if emails can contain special chars for paths)
-        final String emailFileName = authUserEmail.replaceAll(RegExp(r'[^\w.@-]'), '_'); // Basic sanitization
+        final String emailFileName = authUserEmail.replaceAll(RegExp(r'[^\w.@-]'), '_');
         final String imagePath = 'esterni/foto/$emailFileName.jpg';
         logInfo("HomeScreen - _getSignedAvatarUrl: Attempting path: $imagePath in bucket: $bucketName");
-
         try {
           final signedUrl = await supabase.storage.from(bucketName).createSignedUrl(imagePath, expiresIn);
           logInfo("HomeScreen - _getSignedAvatarUrl: Signed URL for 'esterni/foto/' generated: $signedUrl");
@@ -219,24 +198,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- Widget to build the avatar from a given URL (signed or fallback) ---
   Widget _buildAvatarFromUrl(BuildContext context, String url, bool isSignedUrlAttempt, Personale? personaleForFallbackContext) {
     final bool hasValidUrl = Uri.tryParse(url)?.hasAbsolutePath ?? false;
-
-    print("HomeScreen - _buildAvatarFromUrl: Attempting to load. Valid URL: $hasValidUrl, isSignedUrlAttempt: $isSignedUrlAttempt, URL: $url");
-
     if (!hasValidUrl) {
-      print("HomeScreen - _buildAvatarFromUrl: URL non valido fornito: $url");
       return isSignedUrlAttempt ? _buildAvatarFromFallback(context, personaleForFallbackContext) : _buildDefaultAvatar(context, "URL fallback non valido ($url)");
     }
-
     return CircleAvatar(
       radius: 18,
       backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
       child: ClipOval(
         child: Image.network(
           url,
-          key: ValueKey(url), // Key helps update if URL string changes
+          key: ValueKey(url),
           width: 36,
           height: 36,
           fit: BoxFit.fill,
@@ -251,7 +224,6 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           },
           errorBuilder: (context, error, stackTrace) {
-            print("HomeScreen - _buildAvatarFromUrl - errorBuilder: Error loading. isSignedUrlAttempt: $isSignedUrlAttempt, URL: '$url', Error: $error");
             if (isSignedUrlAttempt) {
               return _buildAvatarFromFallback(context, personaleForFallbackContext);
             } else {
@@ -263,28 +235,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- Widget to attempt building the avatar using the fallback URL from Personale model ---
   Widget _buildAvatarFromFallback(BuildContext context, Personale? personaleForFallbackContext) {
     if (personaleForFallbackContext == null) {
-      print("HomeScreen - _buildAvatarFromFallback: Personale object is null, using default avatar.");
       return _buildDefaultAvatar(context, "No Personale data for fallback");
     }
-
     final String? fallbackUrl = personaleForFallbackContext.photoUrl;
     final bool hasValidFallback = fallbackUrl != null && fallbackUrl.isNotEmpty && (Uri.tryParse(fallbackUrl)?.hasAbsolutePath ?? false);
-
     if (hasValidFallback) {
-      print("HomeScreen - _buildAvatarFromFallback: Attempting with fallback URL: $fallbackUrl");
       return _buildAvatarFromUrl(context, fallbackUrl, false, personaleForFallbackContext);
     } else {
-      print("HomeScreen - _buildAvatarFromFallback: No valid fallback URL in Personale data ('${fallbackUrl ?? 'null'}'), using default icon.");
       return _buildDefaultAvatar(context, "No fallback in Personale data");
     }
   }
 
-  // --- Widget to build the default placeholder avatar ---
   Widget _buildDefaultAvatar(BuildContext context, String reason) {
-    print("HomeScreen - _buildDefaultAvatar: Building default avatar. Reason: $reason");
     return CircleAvatar(
       radius: 18,
       backgroundColor: Theme.of(context).colorScheme.primaryContainer,
@@ -294,6 +258,40 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // --- Helper method to build the Drawer widget ---
   Widget _buildDrawer(BuildContext context, double drawerWidth, double starGraphicSize, double starRadius) {
+    final chatExpansionController = ExpansionTileController();
+    final chatSettingsExpansionController = ExpansionTileController();
+    final systemExpansionController = ExpansionTileController();
+
+    // Rinominato: Rimosso underscore iniziale
+    Widget buildTappableExpansionTileTitle({
+      required BuildContext navContext,
+      required IconData icon,
+      required String title,
+      required String routePath,
+      required ExpansionTileController controller,
+      Color? iconColor = primaryBlue,
+      TextStyle? titleStyle,
+    }) {
+      return InkWell(
+        onTap: () {
+          GoRouter.of(navContext).go(routePath);
+          if (!controller.isExpanded) {
+            controller.expand();
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+          child: Row(
+            children: [
+              Icon(icon, color: iconColor ?? Theme.of(navContext).iconTheme.color),
+              const SizedBox(width: 32),
+              Expanded(child: Text(title, style: titleStyle ?? TextStyle(color: iconColor))),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Drawer(
       child: SizedBox(
         width: drawerWidth,
@@ -302,12 +300,10 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(8.0),
             child: Builder(
               builder: (BuildContext drawerContext) {
-                // LA Column ora ha una parte fissa sopra, una scrollabile in mezzo, e una fissa sotto
                 return Column(
-                  key: const Key('drawerColumn'), // Manteniamo la key se serve per i test
+                  key: const Key('drawerColumn'),
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // --- PARTE FISSA SUPERIORE ---
                     SizedBox(
                       width: starGraphicSize,
                       height: starGraphicSize,
@@ -327,12 +323,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 8),
                     const Divider(),
                     const SizedBox(height: 8),
-                    // --- FINE PARTE FISSA SUPERIORE ---
-
-                    // --- PARTE SCROLLABILE CENTRALE ---
                     Expanded(
                       child: ListView(
-                        padding: EdgeInsets.zero, // Rimuove eventuale padding di default della ListView
+                        padding: EdgeInsets.zero,
                         children: [
                           ListTile(
                             leading: const Icon(Icons.home_outlined, color: primaryBlue),
@@ -343,24 +336,33 @@ class _HomeScreenState extends State<HomeScreen> {
                             },
                           ),
                           ExpansionTile(
+                            controller: chatExpansionController,
+                            tilePadding: EdgeInsets.zero,
+                            title: buildTappableExpansionTileTitle(
+                              // Rinominato
+                              navContext: drawerContext,
+                              icon: Icons.chat,
+                              title: 'Una Chat',
+                              routePath: '/una_chat',
+                              controller: chatExpansionController,
+                              titleStyle: const TextStyle(color: primaryBlue),
+                            ),
                             childrenPadding: const EdgeInsets.only(left: 15.0),
-                            leading: const Icon(Icons.chat, color: primaryBlue),
-                            title: const Text('Chat', style: TextStyle(color: primaryBlue)),
                             children: [
                               ListTile(
                                 leading: const Icon(Icons.phone, color: primaryBlue),
                                 title: const Text('Chiamate'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/chat_chiamate');
+                                  GoRouter.of(drawerContext).push('/una_chat_chiamate');
                                 },
                               ),
                               ListTile(
-                                leading: const Icon(Icons.donut_large_outlined, color: primaryBlue), // Era Icons.donut_large
+                                leading: const Icon(Icons.donut_large_outlined, color: primaryBlue),
                                 title: const Text('Stato'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/chat_stato');
+                                  GoRouter.of(drawerContext).push('/una_chat_stato');
                                 },
                               ),
                               ListTile(
@@ -368,7 +370,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: const Text('Messaggi importanti'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/chat_importanti');
+                                  GoRouter.of(drawerContext).push('/una_chat_importanti');
                                 },
                               ),
                               ListTile(
@@ -376,20 +378,28 @@ class _HomeScreenState extends State<HomeScreen> {
                                 title: const Text('Chat archiviate'),
                                 onTap: () {
                                   Navigator.pop(drawerContext);
-                                  GoRouter.of(drawerContext).push('/chat_archiviate');
+                                  GoRouter.of(drawerContext).push('/una_chat_archiviate');
                                 },
                               ),
                               ExpansionTile(
-                                childrenPadding: const EdgeInsets.only(left: 15.0),
-                                title: const Text('Impostazioni', style: TextStyle(color: primaryBlue)),
-                                leading: const Icon(Icons.settings, color: primaryBlue),
+                                controller: chatSettingsExpansionController,
+                                tilePadding: EdgeInsets.zero,
+                                title: buildTappableExpansionTileTitle(
+                                  // Rinominato
+                                  navContext: drawerContext,
+                                  icon: Icons.settings,
+                                  title: 'Impostazioni',
+                                  routePath: '/una_chat_settings',
+                                  controller: chatSettingsExpansionController,
+                                  titleStyle: const TextStyle(color: primaryBlue),
+                                ),
                                 children: [
                                   ListTile(
                                     leading: const Icon(Icons.tune, color: Colors.deepPurple),
                                     title: const Text('Generale'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_generale');
+                                      GoRouter.of(drawerContext).push('/un_chat_settings_generale');
                                     },
                                   ),
                                   ListTile(
@@ -397,15 +407,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Account'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_account');
+                                      GoRouter.of(drawerContext).push('/una_chat_settings_account');
                                     },
                                   ),
                                   ListTile(
                                     leading: const Icon(Icons.chat_bubble, color: Colors.deepPurple),
-                                    title: const Text('Chat'),
+                                    title: const Text('Chat (opzioni)'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_chat');
+                                      GoRouter.of(drawerContext).push('/una_chat_settings_chat');
                                     },
                                   ),
                                   ListTile(
@@ -413,7 +423,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Video e audio'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_video_audio');
+                                      GoRouter.of(drawerContext).push('/una_chat_settings_video_audio');
                                     },
                                   ),
                                   ListTile(
@@ -421,7 +431,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Notifiche'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_notifiche');
+                                      GoRouter.of(drawerContext).push('/una_chat_settings_notifiche');
                                     },
                                   ),
                                   ListTile(
@@ -429,7 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Personalizzazione'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_personalizzazione');
+                                      GoRouter.of(drawerContext).push('/una_chat_settings_personalizzazione');
                                     },
                                   ),
                                   ListTile(
@@ -437,7 +447,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Archiviazione'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_archiviazione');
+                                      GoRouter.of(drawerContext).push('una_chat_settings_archiviazione');
                                     },
                                   ),
                                   ListTile(
@@ -445,7 +455,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Collegamenti rapidi'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_collegamenti_rapidi');
+                                      GoRouter.of(drawerContext).push('/una_chat_settings_collegamenti_rapidi');
                                     },
                                   ),
                                   ListTile(
@@ -453,7 +463,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     title: const Text('Aiuto'),
                                     onTap: () {
                                       Navigator.pop(drawerContext);
-                                      GoRouter.of(drawerContext).push('/chat_settings_aiuto');
+                                      GoRouter.of(drawerContext).push('/una_chat_settings_aiuto');
                                     },
                                   ),
                                 ],
@@ -486,10 +496,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                     ),
-                    // --- FINE PARTE SCROLLABILE CENTRALE ---
-
-                    // --- PARTE FISSA INFERIORE ---
-                    // Lo Spacer è stato rimosso perché Expanded occupa lo spazio disponibile.
                     const Divider(),
                     ListTile(
                       leading: const Icon(Icons.info_outline, color: Colors.grey),
@@ -497,13 +503,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: () {
                         Navigator.pop(drawerContext);
                         showAboutDialog(
-                          context: context, // Usa il context principale
+                          context: context,
                           applicationName: 'Una Social',
                           applicationVersion: ctrl.appVersion.value.isNotEmpty ? ctrl.appVersion.value : 'N/A',
                         );
                       },
                     ),
-                    // --- FINE PARTE FISSA INFERIORE ---
                   ],
                 );
               },
@@ -539,13 +544,14 @@ class _HomeScreenState extends State<HomeScreen> {
             fillColor: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
           ),
           onSubmitted: (value) {
-            //print("Search submitted: $value");
+            // Implement search logic
           },
         ),
       ),
     );
 
     bool shouldShowDbGridControls = false;
+    bool canShowSearchBar = false; // Variabile separata per la search bar
     IconData currentToggleIcon = Icons.view_quilt_outlined;
     String currentToggleTooltip = "Cambia vista";
     DBGridConfig? currentGridConfig;
@@ -560,10 +566,16 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       if (currentDbGridControl != null) {
-        shouldShowDbGridControls = true;
+        shouldShowDbGridControls = true; // Controlli generali DBGrid (refresh, toggle)
+
+        // Logica per la search bar:
+        // Modifica questa condizione se hai un modo diverso per abilitare la ricerca
+        // per una specifica istanza di DBGrid. Per ora, assumiamo che sia sempre
+        // abilitata se shouldShowDbGridControls è true.
+        canShowSearchBar = true;
+
         if (currentGridConfig.uiModes.length > 1) {
           final currentMode = currentDbGridControl.currentDisplayUIMode;
-          // ... (icon/tooltip logic remains the same)
           if (currentMode == UIMode.grid) {
             currentToggleIcon = Icons.article_outlined;
             currentToggleTooltip = "Passa a vista modulo";
@@ -571,20 +583,25 @@ class _HomeScreenState extends State<HomeScreen> {
             int currentIndex = currentGridConfig.uiModes.indexOf(currentMode);
             int nextIndex = (currentIndex + 1) % currentGridConfig.uiModes.length;
             UIMode nextMode = currentGridConfig.uiModes[nextIndex];
+
             if (nextMode == UIMode.grid) {
               currentToggleIcon = Icons.grid_view_rounded;
               currentToggleTooltip = "Passa a vista griglia";
-            } else if (nextMode == UIMode.form) {
-              currentToggleIcon = Icons.article_outlined;
-              currentToggleTooltip = "Passa a vista modulo";
             } else if (nextMode == UIMode.map) {
               currentToggleIcon = Icons.map_outlined;
               currentToggleTooltip = "Passa a vista mappa";
+            } else {
+              currentToggleIcon = Icons.grid_view_rounded;
+              currentToggleTooltip = "Passa a vista griglia";
             }
           } else if (currentMode == UIMode.map) {
             currentToggleIcon = Icons.grid_view_rounded;
             currentToggleTooltip = "Passa a vista griglia";
           }
+        } else {
+          // Se c'è solo una modalità, non mostrare il toggle
+          // ma potresti voler mostrare comunque refresh e search.
+          // shouldShowDbGridControls rimane true per refresh.
         }
       }
     }
@@ -621,21 +638,22 @@ class _HomeScreenState extends State<HomeScreen> {
                       maxLines: 1,
                     ),
                   ),
-                  if (shouldShowDbGridControls) searchBar,
-                  IconButton(
-                    key: const Key('reloadButton'),
-                    tooltip: "Ricarica Dati",
-                    icon: const Icon(Icons.refresh),
-                    onPressed: () {
-                      if (currentDbGridControl != null) {
-                        currentDbGridControl.refreshData();
-                        logInfo("Refresh data for DBGrid triggered from HomeScreen.");
-                      } else {
-                        ctrl.reload(); // General reload if no DBGrid
-                        logInfo("General reload triggered from HomeScreen (no DBGridControl).");
-                      }
-                    },
-                  ),
+                  if (canShowSearchBar) searchBar, // Usa la nuova variabile
+                  if (shouldShowDbGridControls)
+                    IconButton(
+                      key: const Key('reloadButton'),
+                      tooltip: "Ricarica Dati",
+                      icon: const Icon(Icons.refresh),
+                      onPressed: () {
+                        if (currentDbGridControl != null) {
+                          currentDbGridControl.refreshData();
+                          logInfo("Refresh data for DBGrid triggered from HomeScreen.");
+                        } else {
+                          ctrl.reload();
+                          logInfo("General reload triggered from HomeScreen (no DBGridControl).");
+                        }
+                      },
+                    ),
                   if (shouldShowDbGridControls && currentGridConfig != null && currentGridConfig.uiModes.length > 1)
                     IconButton(
                       key: const Key('toggleViewButton'),
@@ -650,8 +668,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     final currentMessage = ctrl.message.value;
 
                     if (authUser == null) {
-                      // This is the state after logout, or if not logged in initially.
-                      // The PopupMenuButton is not part of this path.
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8.0),
                         child: _buildDefaultAvatar(context, "Utente non autenticato"),
@@ -659,20 +675,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
 
                     bool isLoadingProfile = personaleFromDb == null && (currentMessage == 'Caricamento dati utente...' || currentMessage == 'Ricaricamento...' || currentMessage.isEmpty && ctrl.personale.value == null);
-
                     if (isLoadingProfile) {
                       return const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 8.0),
-                        child: SizedBox(
-                          width: 36,
-                          height: 36,
-                          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                        ),
+                        child: SizedBox(width: 36, height: 36, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
                       );
                     }
 
                     bool hasLoadError = personaleFromDb == null && currentMessage.toLowerCase().contains('errore') && currentMessage != 'Profilo personale non trovato.';
-
                     if (hasLoadError) {
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -681,7 +691,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
 
                     return FutureBuilder<String?>(
-                      key: ValueKey('avatar_${authUser.id}'),
+                      key: ValueKey('avatar_${authUser.id}_${personaleFromDb?.photoUrl}'),
                       future: _getSignedAvatarUrl(personaleFromDb, authUser.email!, currentMessage),
                       builder: (context, snapshot) {
                         Widget avatarWidget;
@@ -690,7 +700,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (snapshot.connectionState == ConnectionState.waiting) {
                           avatarWidget = const CircleAvatar(radius: 18, child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
                         } else if (snapshot.hasError) {
-                          logInfo("FutureBuilder for avatar URL snapshot has error: ${snapshot.error}");
                           avatarWidget = _buildAvatarFromFallback(context, effectivePersonaleForFallback);
                         } else if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
                           avatarWidget = _buildAvatarFromUrl(context, snapshot.data!, true, effectivePersonaleForFallback);
@@ -727,30 +736,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                 break;
                               case ProfileAction.logout:
                                 AuthHelper.setLogoutReason(LogoutReason.userInitiated);
-                                logInfo("[HomeScreen] Logout: ProfileAction.logout selected. Scheduling signOut after current frame and a tiny delay.");
-
                                 WidgetsBinding.instance.addPostFrameCallback((_) {
                                   if (mounted) {
-                                    // Add a very short delay to allow the UI to settle even more
                                     Future.delayed(const Duration(milliseconds: 50), () {
-                                      // Try values like 20, 50, or 100
                                       if (mounted) {
-                                        // Check mounted again after the delay
-                                        logInfo("[HomeScreen] Logout: Executing signOut from addPostFrameCallback after additional delay. Widget is mounted.");
-                                        Supabase.instance.client.auth.signOut().then((_) {
-                                          logInfo("[HomeScreen] Logout: signOut Future completed (listeners will handle navigation/state).");
-                                        }).catchError((error, stackTrace) {
-                                          logInfo("[HomeScreen] Logout: Error during signOut in addPostFrameCallback: $error\nStack: $stackTrace");
+                                        Supabase.instance.client.auth.signOut().then((_) {}).catchError((error, stackTrace) {
                                           if (mounted) {
                                             AuthHelper.clearLastLogoutReason();
                                           }
                                         });
-                                      } else {
-                                        logInfo("[HomeScreen] Logout: Widget was unmounted before delayed signOut could execute.");
                                       }
                                     });
-                                  } else {
-                                    logInfo("[HomeScreen] Logout: Widget was unmounted before addPostFrameCallback's inner logic could execute.");
                                   }
                                 });
                                 break;

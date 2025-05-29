@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:una_social_app/painters/star_painter.dart';
+import 'package:una_social/painters/star_painter.dart';
 
 const Color primaryBlue = Color(0xFF0028FF);
 const Color primaryGold = Color(0xFFFFD700);

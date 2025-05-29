@@ -1,6 +1,6 @@
 // lib/screens/strutture_screen.dart
 import 'package:flutter/material.dart';
-import 'package:una_social_app/helpers/db_grid.dart'; // DBGridProvider is here
+import 'package:una_social/helpers/db_grid.dart'; // DBGridProvider is here
 
 class StruttureScreen extends StatefulWidget implements DBGridProvider {
   // Implement interface

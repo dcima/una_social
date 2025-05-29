@@ -3,7 +3,7 @@
 
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social_app/helpers/logger_helper.dart'; // Per Supabase client
+import 'package:una_social/helpers/logger_helper.dart'; // Per Supabase client
 
 class AuthController extends GetxController {
   final SupabaseClient _supabase = Supabase.instance.client;

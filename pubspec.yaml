@@ -1,8 +1,8 @@
-name: una_social_app
+name: una_social
 description: "Una Social"
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
-version: 0.0.0+145
+version: 0.0.0+148
 # A Flutter project to create a social app using Supabase and GoRouter  
 
 environment:
@@ -13,6 +13,10 @@ dependencies:
     sdk: flutter
   flutter_web_plugins: 
     sdk: flutter       
+
+  # Dipendenze verso i tuoi pacchetti locali
+  una_chat:
+    path: packages/una_chat
 
   csv: ^6.0.0
   cupertino_icons: ^1.0.6

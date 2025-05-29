@@ -4,54 +4,49 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social_app/helpers/logger_helper.dart';
+import 'package:una_chat/screens/una_chat_main_screen.dart';
+import 'package:una_social/helpers/logger_helper.dart'; // Assicurati che esista
 import 'dart:async';
 
-import 'package:una_social_app/screens/home_screen.dart';
-import 'package:una_social_app/screens/login_screen.dart';
-import 'package:una_social_app/screens/set_password_screen.dart';
-import 'package:una_social_app/screens/splash_screen.dart';
-import 'package:una_social_app/screens/database_screen.dart';
-import 'package:una_social_app/screens/strutture_screen.dart';
-import 'package:una_social_app/screens/unauthorized_screen.dart';
+// Importa le tue schermate
+import 'package:una_social/screens/home_screen.dart';
+import 'package:una_social/screens/login_screen.dart';
+import 'package:una_social/screens/set_password_screen.dart';
+import 'package:una_social/screens/splash_screen.dart';
+import 'package:una_social/screens/database_screen.dart';
+import 'package:una_social/screens/strutture_screen.dart';
+import 'package:una_social/screens/unauthorized_screen.dart';
 
 final _supabase = Supabase.instance.client;
 
-// Helper ASINCRONO per verificare se l'utente è SUPER-ADMIN
-// Ora chiama direttamente la tua funzione RPC 'current_user_is_in_group'
+// Helper ASINCRONO per verificare se l'utente è SUPER-ADMIN (invariato)
 Future<bool> checkCurrentUserIsSuperAdmin() async {
-  // Non ha più bisogno del parametro User
-  // L'utente deve essere loggato per chiamare una funzione che usa auth.uid()
   if (_supabase.auth.currentUser == null) {
     logError("[AppRouter] checkCurrentUserIsSuperAdmin: Utente nullo, non può essere Super Admin.");
     return false;
   }
-
   try {
-    const String superAdminGroupName = 'SUPER-ADMIN'; // Definisci il nome del gruppo una volta
+    const String superAdminGroupName = 'SUPER-ADMIN';
     logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Chiamata RPC 'current_user_is_in_group' con parametro '$superAdminGroupName'");
-
     final dynamic response = await _supabase.rpc(
       'current_user_is_in_group',
       params: {'group_name_param': superAdminGroupName},
     );
-
-    // La tua funzione SQL 'current_user_is_in_group' restituisce un booleano.
-    // Il client Supabase Dart per RPC lo restituirà direttamente come bool.
     if (response is bool) {
       final bool isAdmin = response;
       logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Risultato RPC (boolean): $isAdmin");
       return isAdmin;
     } else {
       logError("[AppRouter] checkCurrentUserIsSuperAdmin: Risposta RPC non è booleana, tipo: ${response.runtimeType}, Data: $response. Considerato non admin.");
-      return false; // In caso di risposta inattesa, assumi non admin per sicurezza
+      return false;
     }
   } catch (e) {
     logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Errore durante chiamata RPC: $e");
-    return false; // In caso di errore, assumi non admin
+    return false;
   }
 }
 
+// GoRouterRefreshStream (invariato)
 class GoRouterRefreshStream extends ChangeNotifier {
   late final StreamSubscription<AuthState> _subscription;
   bool _isDisposed = false;
@@ -78,12 +73,14 @@ class GoRouterRefreshStream extends ChangeNotifier {
 
 class AppRouter {
   static final router = GoRouter(
-    initialLocation: '/',
+    initialLocation: '/splash', // Inizia sempre da splash per i controlli iniziali
     refreshListenable: GoRouterRefreshStream(_supabase.auth.onAuthStateChange),
     routes: [
+      // --- ROUTE PUBBLICHE E DI AUTENTICAZIONE (PRIMO LIVELLO) ---
       GoRoute(
-        path: '/',
-        builder: (context, state) => const SplashScreen(),
+        path: '/', // Solitamente reindirizza a /splash o /home
+        name: 'root',
+        builder: (context, state) => const SplashScreen(), // O una landing page
       ),
       GoRoute(
         path: '/splash',
@@ -96,78 +93,108 @@ class AppRouter {
         builder: (context, state) => const LoginScreen(),
       ),
       GoRoute(
-        path: '/home',
-        name: 'home',
-        builder: (context, state) => const HomeScreen(
-          screenName: 'Home',
-          child: Center(child: Text('Contenuto principale Home')),
-        ),
-        redirect: (context, state) {
-          final user = _supabase.auth.currentUser;
-          final passwordSet = user?.userMetadata?['has_set_password'] == true;
-          if (user != null && !passwordSet) {
-            return '/set-password';
-          }
-          return null;
-        },
-      ),
-      GoRoute(
         path: '/set-password',
         name: 'setPassword',
         builder: (context, state) => const SetPasswordScreen(),
       ),
       GoRoute(
-        path: '/database',
-        name: 'database',
-        builder: (context, state) => const HomeScreen(
-          screenName: 'Database',
-          child: DatabaseScreen(),
-        ),
-        redirect: (context, state) async {
-          final user = _supabase.auth.currentUser; // Utile per i controlli iniziali
-          final bool loggedIn = user != null;
-          final bool passwordSet = user?.userMetadata?['has_set_password'] == true;
-
-          if (!loggedIn) {
-            return '/login';
-          }
-          if (!passwordSet) {
-            return '/set-password';
-          }
-
-          // Chiama la funzione async per verificare il ruolo
-          if (!await checkCurrentUserIsSuperAdmin()) {
-            // Non serve più passare 'user'
-            logInfo('[GoRouter Redirect /database] L\'utente non è Super Admin (da RPC current_user_is_in_group). Redirect a /unauthorized.');
-            return '/unauthorized';
-          }
-          logInfo('[GoRouter Redirect /database] L_utente è Super Admin (da RPC current_user_is_in_group). Accesso consentito.');
-          return null;
-        },
-      ),
-      GoRoute(
-        path: '/strutture', // Definisci il percorso
-        name: 'strutture', // Nome opzionale per la rotta
-        builder: (context, state) => HomeScreen(
-          screenName: 'Gestione Strutture', // Nome da mostrare nell'app bar
-          child: StruttureScreen(), // Il contenuto principale è la tua nuova schermata
-        ),
-        redirect: (context, state) async {
-          final user = _supabase.auth.currentUser;
-          if (user == null) return '/login';
-          if (user.userMetadata?['has_set_password'] != true) return '/set-password';
-
-          // Esempio: solo SUPER-ADMIN può vedere le strutture
-          // if (!await checkCurrentUserIsSuperAdmin()) {
-          //   return '/unauthorized';
-          // }
-          return null; // Permetti accesso se i controlli passano
-        },
-      ),
-      GoRoute(
         path: '/unauthorized',
         name: 'unauthorized',
         builder: (context, state) => const UnauthorizedScreen(),
+      ),
+
+      // --- GRUPPO DI ROUTE PROTETTE (/app/*) ---
+      GoRoute(
+        path: '/app', // Prefisso per tutte le route protette
+        redirect: (context, state) {
+          final user = _supabase.auth.currentUser;
+          // Il redirect globale dovrebbe già aver gestito la maggior parte di questo,
+          // ma è una buona seconda linea di difesa.
+          if (user == null) {
+            logInfo('[GoRouter /app Redirect] Utente nullo. Redirect a /login.');
+            return '/login';
+          }
+          if (user.userMetadata?['has_set_password'] != true) {
+            logInfo('[GoRouter /app Redirect] Password non impostata. Redirect a /set-password.');
+            return '/set-password';
+          }
+          logInfo('[GoRouter /app Redirect] Utente autenticato e password impostata. Accesso a /app consentito.');
+          return null; // Permetti l'accesso al gruppo /app e alle sue figlie
+        },
+        routes: [
+          // Route figlia di default per /app (se si naviga a /app senza un sottomodulo)
+          // Potrebbe reindirizzare a /app/home o mostrare un dashboard principale.
+          // Per ora, la rendiamo uguale a /app/home.
+          GoRoute(
+            path: 'home', // Path completo: /app/home
+            name: 'home', // Nome univoco per la route
+            builder: (context, state) => const HomeScreen(
+              screenName: 'Home', // Nome visualizzato nell'AppBar di HomeScreen
+              child: Center(child: Text('Contenuto principale della Home')), // Widget contenuto
+            ),
+            // Non c'è più bisogno del redirect specifico per auth/pwd qui,
+            // è gestito dal genitore '/app' e dal redirect globale.
+          ),
+          GoRoute(
+            path: 'database', // Path completo: /app/database
+            name: 'database',
+            builder: (context, state) => const HomeScreen(
+              screenName: 'Database',
+              child: DatabaseScreen(), // DatabaseScreen è solo il contenuto
+            ),
+            redirect: (context, state) async {
+              // Questo redirect si attiva DOPO quello del genitore '/app'
+              // e dopo il redirect globale. Qui solo logica specifica per /app/database.
+              if (!await checkCurrentUserIsSuperAdmin()) {
+                logInfo('[GoRouter /app/database Redirect] Utente non Super Admin. Redirect a /unauthorized.');
+                return '/unauthorized'; // /unauthorized è una route di primo livello
+              }
+              logInfo('[GoRouter /app/database Redirect] Utente Super Admin. Accesso consentito.');
+              return null;
+            },
+          ),
+          GoRoute(
+            path: 'strutture', // Path completo: /app/strutture
+            name: 'strutture',
+            builder: (context, state) => HomeScreen(
+              screenName: 'Gestione Strutture',
+              child: StruttureScreen(),
+            ),
+            // Esempio: redirect specifico se necessario per /app/strutture
+            // redirect: (context, state) async {
+            //   if (!await altraVerificaSpecifica()) return '/unauthorized';
+            //   return null;
+            // },
+          ),
+          GoRoute(
+            path: 'una_chat', // Path completo: /app/una_chat
+            builder: (context, state) => HomeScreen(
+              screenName: 'Una Chat',
+              //IMPORTANTE: UnaChatMainScreen qui deve essere il WIDGET DI CONTENUTO,
+              //non uno Scaffold completo, perché HomeScreen fornisce già lo Scaffold.
+              //Se UnaChatMainScreen che hai creato ha il suo Scaffold, AppBar, BottomNav,
+              //dovrai estrarre solo la parte del body per usarla qui.
+              child: UnaChatMainScreen(), // Adatta se necessario
+            ),
+          ),
+          // Aggiungi qui le altre tue route protette seguendo lo stesso pattern:
+          // GoRoute(
+          //   path: 'una_tube', // Path completo: /app/una_tube
+          //   name: 'una_tube',
+          //   builder: (context, state) => HomeScreen(
+          //     screenName: 'Una Tube',
+          //     child: UnaTubeContentWidget(), // Sostituisci con il widget di contenuto reale
+          //   ),
+          // ),
+          // GoRoute(
+          //   path: 'una_tok', // Path completo: /app/una_tok
+          //   name: 'una_tok',
+          //   builder: (context, state) => HomeScreen(
+          //     screenName: 'Una Tok',
+          //     child: UnaTokContentWidget(), // Sostituisci con il widget di contenuto reale
+          //   ),
+          // ),
+        ],
       ),
     ],
     // --- LOGICA DI REDIRECT GLOBALE (SINCRONA) ---
@@ -176,43 +203,64 @@ class AppRouter {
       final session = _supabase.auth.currentSession;
       final bool loggedIn = session != null;
       final bool passwordSet = user?.userMetadata?['has_set_password'] == true;
-      final String currentMatchedLocation = state.matchedLocation;
 
-      logInfo('[GoRouter Global Redirect] Path: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet');
+      final String currentMatchedLocation = state.matchedLocation; // Es. '/', '/login', '/app/home'
+      final String requestedUri = state.uri.toString(); // L'URI completo, es. /app/home?param=1
 
-      final isPublicRoute = (currentMatchedLocation == '/login' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/' || currentMatchedLocation == '/unauthorized');
+      logInfo('[GoRouter Global Redirect] Matched: $currentMatchedLocation, URI: $requestedUri, LoggedIn: $loggedIn, PwdSet: $passwordSet');
 
-      if (loggedIn) {
-        if (!passwordSet && currentMatchedLocation != '/set-password') {
-          return '/set-password';
+      // Definisci i percorsi che non richiedono autenticazione
+      final List<String> publicPaths = ['/splash', '/login', '/set-password', '/unauthorized'];
+      // La root '/' è speciale, la gestiamo come /splash
+      final bool onPublicPath = publicPaths.contains(currentMatchedLocation) || currentMatchedLocation == '/';
+      final bool onSetPasswordPath = currentMatchedLocation == '/set-password';
+
+      if (!loggedIn) {
+        // UTENTE NON LOGGATO
+        if (!onPublicPath) {
+          logInfo('[GoRouter Global Redirect] NOT LoggedIn, NOT on public path. Redirect to /login.');
+          return '/login'; // Se non è loggato e non sta andando a una pagina pubblica, mandalo al login.
         }
-        if (passwordSet && (currentMatchedLocation == '/login' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/set-password' || currentMatchedLocation == '/')) {
-          if (currentMatchedLocation == '/database') {
-            return null;
-          }
-          if (currentMatchedLocation != '/unauthorized') {
-            return '/home';
-          }
-        }
-        return null;
       } else {
-        // Non Loggato
-        if (!isPublicRoute) {
-          return '/login';
+        // UTENTE LOGGATO
+        if (!passwordSet && !onSetPasswordPath) {
+          logInfo('[GoRouter Global Redirect] LoggedIn, Password NOT set, NOT on /set-password. Redirect to /set-password.');
+          return '/set-password'; // Se è loggato ma la password non è settata, e non sta andando a /set-password, forzalo lì.
         }
-        return null;
+        // Se è loggato, la password è settata, e sta tentando di accedere a /, /splash, /login, o /set-password
+        if (passwordSet && (currentMatchedLocation == '/' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/login' || onSetPasswordPath)) {
+          logInfo('[GoRouter Global Redirect] LoggedIn, Password SET, on public/setup path. Redirect to /app/home.');
+          return '/app/home'; // Mandalo alla home page dell'applicazione.
+        }
       }
+
+      // Se nessuna delle condizioni sopra è soddisfatta, non fare nulla, lascia che la navigazione proceda.
+      // I redirect specifici delle route (es. per /app/database o il redirect di /app) faranno il loro lavoro.
+      logInfo('[GoRouter Global Redirect] No global redirect action needed for this route.');
+      return null;
     },
     errorBuilder: (context, state) {
-      /* ... invariato ... */
+      logError('[GoRouter ErrorBuilder] URI: ${state.uri}, Errore: ${state.error}');
       return Scaffold(
         appBar: AppBar(title: const Text('Errore Navigazione')),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'Pagina non trovata o errore del router.\n\nURI Richiesto: ${state.uri}\nErrore: ${state.error}',
-              textAlign: TextAlign.center,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'Pagina non trovata o errore del router.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                Text('Percorso Richiesto: ${state.uri}', textAlign: TextAlign.center),
+                if (state.error != null) ...[
+                  const SizedBox(height: 8),
+                  Text('Dettagli Errore: ${state.error}', textAlign: TextAlign.center),
+                ]
+              ],
             ),
           ),
         ),
