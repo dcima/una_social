@@ -1,6 +1,7 @@
 // lib/helpers/db_grid_form_view.dart
 import 'package:flutter/material.dart';
-import 'package:una_social_app/helpers/db_grid.dart'; // For DBGridControl and UIMode
+import 'package:una_social_app/helpers/db_grid.dart';
+import 'package:una_social_app/helpers/logger_helper.dart'; // For DBGridControl and UIMode
 
 class DBGridFormView extends StatelessWidget {
   final Map<String, dynamic> formData;
@@ -99,12 +100,17 @@ class DBGridFormView extends StatelessWidget {
                       tooltip: "Record Precedente",
                       onPressed: dbGridControl.canGoToPreviousRecordInForm() ? () => dbGridControl.goToPreviousRecordInForm() : null, // Disable if cannot go back
                     ),
-                    // Text("Record X di Y"), // Placeholder for current record number
+                    Text("Record X di Y"), // Placeholder for current record number
                     IconButton(
-                      icon: const Icon(Icons.arrow_forward_ios),
-                      tooltip: "Record Successivo",
-                      onPressed: dbGridControl.canGoToNextRecordInForm() ? () => dbGridControl.goToNextRecordInForm() : null, // Disable if cannot go next
-                    ),
+                        icon: const Icon(Icons.arrow_forward_ios),
+                        tooltip: "Record Successivo",
+                        onPressed: () {
+                          bool yesWeCan = dbGridControl.canGoToNextRecordInForm();
+                          logInfo("Record Successivo: $yesWeCan");
+                          if (yesWeCan) {
+                            dbGridControl.goToNextRecordInForm();
+                          }
+                        }),
                   ],
                 ),
                 const SizedBox(height: 20.0),

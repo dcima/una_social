@@ -411,11 +411,13 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
   @override
   bool canGoToPreviousRecordInForm() {
+    logInfo('canGoToPreviousRecordInForm: $_currentFormRecordIndex');
     return _currentFormRecordIndex > 0;
   }
 
   @override
   bool canGoToNextRecordInForm() {
+    logInfo('canGoToNextRecordInForm: $_data.length - $_currentFormRecordIndex');
     return _currentFormRecordIndex < _data.length - 1;
   }
 

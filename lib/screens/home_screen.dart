@@ -53,10 +53,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initPackageInfo() async {
     final PackageInfo info = await PackageInfo.fromPlatform();
-    setState(() {
-      _appVersion = info.version;
-      _buildNumber = info.buildNumber;
-    });
+    if (mounted) {
+      setState(() {
+        _appVersion = info.version;
+        _buildNumber = info.buildNumber;
+      });
+    }
   }
 
   // Method to toggle the view state
@@ -114,18 +116,14 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showProfileDialog(BuildContext context, Personale currentUser) {
     showDialog(
       context: context,
-      // Consider barrierDismissible: true if you want users to tap outside to close
       barrierDismissible: false,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Modifica Profilo'),
-          // Use scrollable content if PersonaleProfile might overflow
           contentPadding: EdgeInsets.zero,
-          scrollable: true, // Makes content scrollable if needed
+          scrollable: true,
           content: SizedBox(
-            // Adjust width constraints as needed, especially for desktop
-            width: MediaQuery.of(context).size.width * 0.6, // Example width
-            // Pass the current user data to the editing widget
+            width: MediaQuery.of(context).size.width * 0.6,
             child: PersonaleProfile(initialPersonale: currentUser),
           ),
         );
@@ -135,68 +133,101 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // --- Helper function to show snackbars safely after build ---
   void _showSnackbar(BuildContext ctx, String message, {bool isError = false}) {
-    if (!ctx.mounted) return; // Check if context is still valid
+    if (!ctx.mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!ctx.mounted) return; // Double check after callback delay
+      if (!ctx.mounted) return;
       ScaffoldMessenger.of(ctx).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: isError ? Colors.redAccent : Colors.green, // Use green for success?
+          backgroundColor: isError ? Colors.redAccent : Colors.green,
           duration: const Duration(seconds: 3),
-          behavior: SnackBarBehavior.floating, // Optional: makes it float
+          behavior: SnackBarBehavior.floating,
         ),
       );
     });
   }
 
   // --- Helper function to generate the Supabase signed URL ---
-  Future<String?> _getSignedAvatarUrl(Personale currentUser) async {
-    // Se currentUser.photoUrl è null o vuoto, procedi a generare la signed URL.
-    // Altrimenti, usa il photoUrl esistente (che potrebbe essere un fallback o una URL già funzionante)
-    if (currentUser.photoUrl != null && currentUser.photoUrl!.isNotEmpty) {
-      //print("HomeScreen - _getSignedAvatarUrl: Using existing photoUrl: ${currentUser.photoUrl}");
-      return currentUser.photoUrl; // Restituisci la URL esistente
-    }
-
-    //print('HomeScreen: _getSignedAvatarUrl: Generazione URL firmato per l'avatar di ${currentUser.nome} ${currentUser.cognome} (${currentUser.id})');
-    // ... resto della logica per generare la signed URL ...
-    final ente = currentUser.ente;
-    final id = currentUser.id;
-
-    if (ente.isEmpty || id <= 0) {
-      //print("HomeScreen - _getSignedAvatarUrl: Dati insufficienti (ente o id mancanti).");
-      return null;
-    }
-
-    final String imagePath = 'personale/foto/${ente}_$id.jpg';
+  Future<String?> _getSignedAvatarUrl(Personale? currentUserFromDb, String authUserEmail, String controllerMessage) async {
     const String bucketName = 'una-bucket';
-    const int expiresIn = 86400 * 365 * 50; // token temporaneo di 50 anni (in secondi) !!!!
-    try {
-      final supabase = Supabase.instance.client;
-      final signedUrl = await supabase.storage.from(bucketName).createSignedUrl(imagePath, expiresIn);
-      //print("HomeScreen - _getSignedAvatarUrl: URL firmato generato: $signedUrl");
-      // NON aggiornare currentUser.photoUrl qui con la signed URL temporanea.
-      return signedUrl;
-    } on StorageException catch (e) {
-      // Questa eccezione avviene se createSignedUrl stesso fallisce (es. bucket non trovato, o a volte per oggetto non trovato)
-      print("HomeScreen - _getSignedAvatarUrl: StorageException durante createSignedUrl per $imagePath: ${e.message} (StatusCode: ${e.statusCode})");
-      return null; // Indica che la generazione della URL è fallita
-    } catch (e, stackTrace) {
-      print("HomeScreen - _getSignedAvatarUrl: Errore imprevisto durante createSignedUrl per $imagePath: $e\nStackTrace: $stackTrace");
-      return null;
+    const int expiresIn = 86400 * 365 * 50; // 50 years
+    final supabase = Supabase.instance.client;
+
+    // Scenario 1: currentUserFromDb (from 'personale' table) exists
+    if (currentUserFromDb != null) {
+      // 1a: It has a direct, usable photoUrl
+      if (currentUserFromDb.photoUrl != null && currentUserFromDb.photoUrl!.isNotEmpty) {
+        logInfo("HomeScreen - _getSignedAvatarUrl: Using existing photoUrl from Personale object: ${currentUserFromDb.photoUrl}");
+        return currentUserFromDb.photoUrl;
+      }
+
+      // 1b: Generate signed URL from 'personale/foto/'
+      logInfo("HomeScreen: _getSignedAvatarUrl: Generating signed URL for ${currentUserFromDb.nome} ${currentUserFromDb.cognome} (ID: ${currentUserFromDb.id}) from 'personale/foto/' path.");
+      final ente = currentUserFromDb.ente;
+      final id = currentUserFromDb.id;
+
+      if (ente.isEmpty || id <= 0) {
+        logInfo("HomeScreen - _getSignedAvatarUrl: Insufficient data (ente or id missing in Personale object) for 'personale/foto/' path.");
+        return null; // Cannot form path
+      }
+      final String imagePath = 'personale/foto/${ente}_$id.jpg';
+
+      try {
+        final signedUrl = await supabase.storage.from(bucketName).createSignedUrl(imagePath, expiresIn);
+        logInfo("HomeScreen - _getSignedAvatarUrl: Signed URL for 'personale/foto/' generated: $signedUrl");
+        return signedUrl;
+      } on StorageException catch (e) {
+        logInfo("HomeScreen - _getSignedAvatarUrl: StorageException for 'personale/foto/$imagePath': ${e.message} (StatusCode: ${e.statusCode})");
+        return null;
+      } catch (e, stackTrace) {
+        logInfo("HomeScreen - _getSignedAvatarUrl: Unexpected error for 'personale/foto/$imagePath': $e\nStackTrace: $stackTrace");
+        return null;
+      }
+    }
+    // Scenario 2: currentUserFromDb is null (no record in 'personale' table)
+    else {
+      logInfo("HomeScreen - _getSignedAvatarUrl: currentUserFromDb is null.");
+      // Check if the reason is "Profilo personale non trovato."
+      if (controllerMessage == 'Profilo personale non trovato.') {
+        logInfo("HomeScreen - _getSignedAvatarUrl: Controller message indicates 'Profilo personale non trovato.' Attempting to load from 'esterni/foto/' for email: $authUserEmail");
+
+        if (authUserEmail.isEmpty) {
+          logInfo("HomeScreen - _getSignedAvatarUrl: Auth user email is empty, cannot form 'esterni/foto/' path.");
+          return null;
+        }
+
+        // Ensure email is a valid path component (basic sanitization might be needed if emails can contain special chars for paths)
+        final String emailFileName = authUserEmail.replaceAll(RegExp(r'[^\w.@-]'), '_'); // Basic sanitization
+        final String imagePath = 'esterni/foto/$emailFileName.jpg';
+        logInfo("HomeScreen - _getSignedAvatarUrl: Attempting path: $imagePath in bucket: $bucketName");
+
+        try {
+          final signedUrl = await supabase.storage.from(bucketName).createSignedUrl(imagePath, expiresIn);
+          logInfo("HomeScreen - _getSignedAvatarUrl: Signed URL for 'esterni/foto/' generated: $signedUrl");
+          return signedUrl;
+        } on StorageException catch (e) {
+          logInfo("HomeScreen - _getSignedAvatarUrl: StorageException for 'esterni/foto/$imagePath': ${e.message} (StatusCode: ${e.statusCode})");
+          return null;
+        } catch (e, stackTrace) {
+          logInfo("HomeScreen - _getSignedAvatarUrl: Unexpected error for 'esterni/foto/$imagePath': $e\nStackTrace: $stackTrace");
+          return null;
+        }
+      } else {
+        logInfo("HomeScreen - _getSignedAvatarUrl: currentUserFromDb is null and message is '$controllerMessage'. Not attempting 'esterni/foto/'.");
+        return null;
+      }
     }
   }
 
   // --- Widget to build the avatar from a given URL (signed or fallback) ---
-  Widget _buildAvatarFromUrl(BuildContext context, String url, bool isSignedUrlAttempt, Personale personale) {
+  Widget _buildAvatarFromUrl(BuildContext context, String url, bool isSignedUrlAttempt, Personale? personaleForFallbackContext) {
     final bool hasValidUrl = Uri.tryParse(url)?.hasAbsolutePath ?? false;
 
-    // AGGIUNTA LOG
     print("HomeScreen - _buildAvatarFromUrl: Attempting to load. Valid URL: $hasValidUrl, isSignedUrlAttempt: $isSignedUrlAttempt, URL: $url");
 
     if (!hasValidUrl) {
       print("HomeScreen - _buildAvatarFromUrl: URL non valido fornito: $url");
-      return isSignedUrlAttempt ? _buildAvatarFromFallback(context, personale) : _buildDefaultAvatar(context, "URL fallback non valido ($url)");
+      return isSignedUrlAttempt ? _buildAvatarFromFallback(context, personaleForFallbackContext) : _buildDefaultAvatar(context, "URL fallback non valido ($url)");
     }
 
     return CircleAvatar(
@@ -205,7 +236,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: ClipOval(
         child: Image.network(
           url,
-          key: ValueKey(url),
+          key: ValueKey(url), // Key helps update if URL string changes
           width: 36,
           height: 36,
           fit: BoxFit.fill,
@@ -220,15 +251,10 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           },
           errorBuilder: (context, error, stackTrace) {
-            // AGGIUNTA LOG
             print("HomeScreen - _buildAvatarFromUrl - errorBuilder: Error loading. isSignedUrlAttempt: $isSignedUrlAttempt, URL: '$url', Error: $error");
-
             if (isSignedUrlAttempt) {
-              // Non chiamare _showSnackbar qui per ora, per semplificare il debug
-              // _showSnackbar(context, "Errore immagine Supabase, uso fallback...", isError: true);
-              return _buildAvatarFromFallback(context, personale);
+              return _buildAvatarFromFallback(context, personaleForFallbackContext);
             } else {
-              // _showSnackbar(context, "Errore immagine fallback, uso icona default.", isError: true);
               return _buildDefaultAvatar(context, "Errore fallback ($url)");
             }
           },
@@ -238,25 +264,27 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // --- Widget to attempt building the avatar using the fallback URL from Personale model ---
-  Widget _buildAvatarFromFallback(BuildContext context, Personale personale) {
-    final String? fallbackUrl = personale.photoUrl; // Get fallback URL from model
+  Widget _buildAvatarFromFallback(BuildContext context, Personale? personaleForFallbackContext) {
+    if (personaleForFallbackContext == null) {
+      print("HomeScreen - _buildAvatarFromFallback: Personale object is null, using default avatar.");
+      return _buildDefaultAvatar(context, "No Personale data for fallback");
+    }
+
+    final String? fallbackUrl = personaleForFallbackContext.photoUrl;
     final bool hasValidFallback = fallbackUrl != null && fallbackUrl.isNotEmpty && (Uri.tryParse(fallbackUrl)?.hasAbsolutePath ?? false);
 
     if (hasValidFallback) {
-      //print("Tentativo con URL fallback: $fallbackUrl");
-      // Call the main URL builder, indicating it's NOT a signed URL attempt
-      return _buildAvatarFromUrl(context, fallbackUrl, false, personale);
+      print("HomeScreen - _buildAvatarFromFallback: Attempting with fallback URL: $fallbackUrl");
+      return _buildAvatarFromUrl(context, fallbackUrl, false, personaleForFallbackContext);
     } else {
-      //print("Nessun URL fallback valido trovato (${fallbackUrl ?? 'null'}), uso icona default.");
-      // No snackbar here, as the previous step might have shown one
-      return _buildDefaultAvatar(context, "No fallback"); // Return default if no valid fallback
+      print("HomeScreen - _buildAvatarFromFallback: No valid fallback URL in Personale data ('${fallbackUrl ?? 'null'}'), using default icon.");
+      return _buildDefaultAvatar(context, "No fallback in Personale data");
     }
   }
 
   // --- Widget to build the default placeholder avatar ---
   Widget _buildDefaultAvatar(BuildContext context, String reason) {
-    // AGGIUNTA LOG
-    print("HomeScreen - _buildDefaultAvatar: Costruzione avatar default. Reason: $reason");
+    print("HomeScreen - _buildDefaultAvatar: Building default avatar. Reason: $reason");
     return CircleAvatar(
       radius: 18,
       backgroundColor: Theme.of(context).colorScheme.primaryContainer,
@@ -265,23 +293,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // --- Helper method to build the Drawer widget ---
-  // This method encapsulates the drawer creation logic
   Widget _buildDrawer(BuildContext context, double drawerWidth, double starGraphicSize, double starRadius) {
     return Drawer(
       child: SizedBox(
         width: drawerWidth,
         child: SafeArea(
-          // Avoids status bar/notch overlap
           child: Padding(
             padding: const EdgeInsets.all(8.0),
-            // IMPORTANT: Builder provides the correct context for Navigator.pop
             child: Builder(
               builder: (BuildContext drawerContext) {
-                // Context BELOW the Scaffold
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Star Graphic
                     SizedBox(
                       width: starGraphicSize,
                       height: starGraphicSize,
@@ -297,58 +320,52 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    // Title
                     Text('Una Social', style: GoogleFonts.lato(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
                     const SizedBox(height: 8),
-                    const Divider(), // Separator
+                    const Divider(),
                     const SizedBox(height: 8),
-                    // Menu Items
                     ListTile(
-                      leading: const Icon(Icons.home_outlined, color: primaryBlue), // Example: Home icon
-                      title: const Text('Home'), // Example: Home item
+                      leading: const Icon(Icons.home_outlined, color: primaryBlue),
+                      title: const Text('Home'),
                       onTap: () {
-                        Navigator.pop(drawerContext); // Use drawerContext to close
-                        GoRouter.of(drawerContext).go('/home'); // Navigate
+                        Navigator.pop(drawerContext);
+                        GoRouter.of(drawerContext).go('/home');
                       },
                     ),
                     ExpansionTile(
-                      childrenPadding: EdgeInsets.only(left: 15.0), // Padding per i figli dell'ExpansionTile annidato
-                      leading: Icon(Icons.build, color: primaryBlue), // Icon for the ExpansionTile
+                      childrenPadding: EdgeInsets.only(left: 15.0),
+                      leading: Icon(Icons.build, color: primaryBlue),
                       title: const Text('Sistema', style: TextStyle(color: primaryBlue)),
                       children: [
                         ListTile(
                           leading: const Icon(Icons.business_center, color: primaryBlue),
                           title: const Text('Strutture'),
                           onTap: () {
-                            Navigator.pop(drawerContext); // Use drawerContext to close
-                            GoRouter.of(drawerContext).push('/strutture'); // Navigate
+                            Navigator.pop(drawerContext);
+                            GoRouter.of(drawerContext).push('/strutture');
                           },
                         ),
                         ListTile(
                           leading: const Icon(Icons.storage_rounded, color: primaryBlue),
                           title: const Text('Database'),
                           onTap: () {
-                            Navigator.pop(drawerContext); // Use drawerContext to close
-                            GoRouter.of(drawerContext).push('/database'); // Navigate
+                            Navigator.pop(drawerContext);
+                            GoRouter.of(drawerContext).push('/database');
                           },
                         ),
                       ],
                     ),
-                    const Spacer(), // Pushes following items to the bottom
+                    const Spacer(),
                     const Divider(),
-                    // App Info Item
                     ListTile(
                       leading: const Icon(Icons.info_outline, color: Colors.grey),
                       title: const Text('App Info', style: TextStyle(color: Colors.grey)),
                       onTap: () {
-                        Navigator.pop(drawerContext); // Use drawerContext to close
-                        // Show About Dialog
+                        Navigator.pop(drawerContext);
                         showAboutDialog(
-                          context: context, // Use the main context here is fine
+                          context: context,
                           applicationName: 'Una Social',
                           applicationVersion: ctrl.appVersion.value.isNotEmpty ? ctrl.appVersion.value : 'N/A',
-                          // applicationIcon: FlutterLogo(), // Optional icon
-                          // children: [...], // Optional extra info
                         );
                       },
                     ),
@@ -364,21 +381,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // This is the 'outer' context
-    // Calculate drawer width based on screen size
     final screenWidth = MediaQuery.of(context).size.width;
-    final bool isDesktop = screenWidth > 600; // Example breakpoint
+    final bool isDesktop = screenWidth > 600;
     final double drawerWidth = isDesktop ? 200.0 : screenWidth * 0.8;
-
-    // Define sizes for the star graphic in the drawer
     const double starGraphicSize = 80.0;
     const double starRadius = starGraphicSize / 2 * 0.8;
 
-    // Define the Search Bar widget separately for clarity
     Widget searchBar = Expanded(
-      // Use Expanded to allow shrinking
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 250), // Max width for search
+        constraints: const BoxConstraints(maxWidth: 250),
         padding: const EdgeInsets.symmetric(horizontal: 8.0),
         child: TextField(
           key: const Key('searchField'),
@@ -399,33 +410,29 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    bool shouldShowDbGridControls = false; // Unified flag for search and toggle
-    IconData currentToggleIcon = Icons.view_quilt_outlined; // Default icon
-    String currentToggleTooltip = "Cambia vista"; // Default tooltip
+    bool shouldShowDbGridControls = false;
+    IconData currentToggleIcon = Icons.view_quilt_outlined;
+    String currentToggleTooltip = "Cambia vista";
     DBGridConfig? currentGridConfig;
     DBGridControl? currentDbGridControl;
 
     if (widget.child is DBGridProvider) {
       final dbGridProvider = widget.child as DBGridProvider;
-      currentGridConfig = dbGridProvider.dbGridConfig; // Get config via interface
-
+      currentGridConfig = dbGridProvider.dbGridConfig;
       final State<DBGridWidget>? actualState = dbGridProvider.dbGridWidgetKey.currentState;
       if (actualState != null && actualState is DBGridControl) {
         currentDbGridControl = actualState as DBGridControl;
       }
 
       if (currentDbGridControl != null) {
-        shouldShowDbGridControls = true; // Show controls if we have both config and control
-
+        shouldShowDbGridControls = true;
         if (currentGridConfig.uiModes.length > 1) {
           final currentMode = currentDbGridControl.currentDisplayUIMode;
+          // ... (icon/tooltip logic remains the same)
           if (currentMode == UIMode.grid) {
-            currentToggleIcon = Icons.article_outlined; // Icon to switch to form
+            currentToggleIcon = Icons.article_outlined;
             currentToggleTooltip = "Passa a vista modulo";
           } else if (currentMode == UIMode.form) {
-            currentToggleIcon = Icons.map_outlined; // Icon to switch to map (or next in cycle)
-            currentToggleTooltip = "Passa a vista mappa"; // Adjust if cycle is different
-            // Example: if map is last, go back to grid
             int currentIndex = currentGridConfig.uiModes.indexOf(currentMode);
             int nextIndex = (currentIndex + 1) % currentGridConfig.uiModes.length;
             UIMode nextMode = currentGridConfig.uiModes[nextIndex];
@@ -440,79 +447,60 @@ class _HomeScreenState extends State<HomeScreen> {
               currentToggleTooltip = "Passa a vista mappa";
             }
           } else if (currentMode == UIMode.map) {
-            currentToggleIcon = Icons.grid_view_rounded; // Icon to switch to grid (or next)
+            currentToggleIcon = Icons.grid_view_rounded;
             currentToggleTooltip = "Passa a vista griglia";
           }
         }
-        // If uiModes.length <= 1, the toggle button itself won't be shown later,
-        // but shouldShowDbGridControls might still be true for the search bar.
       }
     }
 
-    // --- Main Scaffold Structure ---
     return Scaffold(
-      // Assign the drawer using the helper method
       drawer: _buildDrawer(context, drawerWidth, starGraphicSize, starRadius),
-      // Body is a Column containing AppBar, Content, Status Bar
       body: Column(
         children: [
-          // --- Top Row (AppBar Simulation) ---
           Material(
-            // Provides elevation/shadow like AppBar
-            elevation: 1.0, // Subtle shadow
+            elevation: 1.0,
             color: Theme.of(context).appBarTheme.backgroundColor ?? Theme.of(context).canvasColor,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              height: kToolbarHeight, // Standard AppBar height
-              // Use SafeArea for top padding if needed, depends on design
-              // child: SafeArea( // Uncomment if content goes under status bar
+              height: kToolbarHeight,
               child: Row(
                 children: [
-                  // --- Menu Button ---
-                  Builder(// IMPORTANT: Provides context below Scaffold
-                      builder: (BuildContext innerContext) {
-                    // Context for Scaffold.of
+                  Builder(builder: (BuildContext innerContext) {
                     return IconButton(
                       tooltip: "Apri menù",
                       icon: const Icon(Icons.menu),
-                      onPressed: () => Scaffold.of(innerContext).openDrawer(), // Use innerContext
+                      onPressed: () => Scaffold.of(innerContext).openDrawer(),
                     );
                   }),
                   const SizedBox(width: 8),
-                  // --- Logo and Title ---
                   const FlutterLogo(size: 24),
                   const SizedBox(width: 8),
                   const Text('Una Social', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(width: 12),
-                  // --- Screen Name ---
                   Expanded(
                     child: Text(
-                      widget.screenName, // Display current screen name
+                      widget.screenName,
                       style: const TextStyle(fontSize: 16),
                       overflow: TextOverflow.ellipsis,
                       maxLines: 1,
                     ),
                   ),
-
-                  // Conditionally show Search Bar
                   if (shouldShowDbGridControls) searchBar,
-                  // --- Action Buttons ---
                   IconButton(
                     key: const Key('reloadButton'),
-                    tooltip: "Ricarica Dati Utente",
+                    tooltip: "Ricarica Dati",
                     icon: const Icon(Icons.refresh),
                     onPressed: () {
                       if (currentDbGridControl != null) {
                         currentDbGridControl.refreshData();
                         logInfo("Refresh data for DBGrid triggered from HomeScreen.");
                       } else {
-                        // Fallback or general reload if no DBGridControl
-                        ctrl.reload();
+                        ctrl.reload(); // General reload if no DBGrid
                         logInfo("General reload triggered from HomeScreen (no DBGridControl).");
                       }
-                    }, // Call controller's reload method
+                    },
                   ),
-                  // Conditionally show Toggle View Button
                   if (shouldShowDbGridControls && currentGridConfig != null && currentGridConfig.uiModes.length > 1)
                     IconButton(
                       key: const Key('toggleViewButton'),
@@ -521,184 +509,161 @@ class _HomeScreenState extends State<HomeScreen> {
                       onPressed: _handleToggleView,
                     ),
                   const SizedBox(width: 10),
-
-                  // --- Profile Avatar and Menu ---
                   Obx(() {
-                    // Listens to the personale data in the controller
-                    final personale = ctrl.personale.value;
+                    final personaleFromDb = ctrl.personale.value;
+                    final authUser = Supabase.instance.client.auth.currentUser;
+                    final currentMessage = ctrl.message.value;
 
-                    // State 1: Controller is loading or has error initially
-                    if (personale == null) {
-                      if (ctrl.message.value.toLowerCase().contains('errore')) {
-                        // Controller loaded with an error state
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                          child: Tooltip(
-                              // Show error on hover
-                              message: "Errore caricamento: ${ctrl.message.value}",
-                              child: _buildDefaultAvatar(context, "Errore controller")),
-                        );
-                      } else {
-                        // Controller is still loading initial data
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8.0),
-                          child: SizedBox(
-                            width: 36,
-                            height: 36,
-                            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                          ),
-                        );
-                      }
+                    if (authUser == null) {
+                      // This is the state after logout, or if not logged in initially.
+                      // The PopupMenuButton is not part of this path.
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                        child: _buildDefaultAvatar(context, "Utente non autenticato"),
+                      );
                     }
 
-                    // State 2: Personale data exists, fetch signed URL
-                    return FutureBuilder<String?>(
-                      // Key ensures refetch if user ID changes (e.g., after edit/reload)
-                      key: ValueKey('avatar_${personale.id}'),
-                      future: _getSignedAvatarUrl(personale),
-                      builder: (context, snapshot) {
-                        Widget avatarWidget; // The widget to display (avatar or loading)
+                    bool isLoadingProfile = personaleFromDb == null && (currentMessage == 'Caricamento dati utente...' || currentMessage == 'Ricaricamento...' || currentMessage.isEmpty && ctrl.personale.value == null);
 
-                        // Determine avatar based on FutureBuilder state
+                    if (isLoadingProfile) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8.0),
+                        child: SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        ),
+                      );
+                    }
+
+                    bool hasLoadError = personaleFromDb == null && currentMessage.toLowerCase().contains('errore') && currentMessage != 'Profilo personale non trovato.';
+
+                    if (hasLoadError) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                        child: Tooltip(message: "Errore: $currentMessage", child: _buildDefaultAvatar(context, "Errore controller: $currentMessage")),
+                      );
+                    }
+
+                    return FutureBuilder<String?>(
+                      key: ValueKey('avatar_${authUser.id}'),
+                      future: _getSignedAvatarUrl(personaleFromDb, authUser.email!, currentMessage),
+                      builder: (context, snapshot) {
+                        Widget avatarWidget;
+                        Personale? effectivePersonaleForFallback = personaleFromDb;
+
                         if (snapshot.connectionState == ConnectionState.waiting) {
                           avatarWidget = const CircleAvatar(radius: 18, child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
                         } else if (snapshot.hasError) {
-                          // Error getting signed URL, attempt fallback
-                          avatarWidget = _buildAvatarFromFallback(context, personale);
+                          logInfo("FutureBuilder for avatar URL snapshot has error: ${snapshot.error}");
+                          avatarWidget = _buildAvatarFromFallback(context, effectivePersonaleForFallback);
                         } else if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
-                          // Got a signed URL, attempt to display it
-                          avatarWidget = _buildAvatarFromUrl(context, snapshot.data!, true, personale);
+                          avatarWidget = _buildAvatarFromUrl(context, snapshot.data!, true, effectivePersonaleForFallback);
                         } else {
-                          // Future completed but no valid signed URL returned, attempt fallback
-                          avatarWidget = _buildAvatarFromFallback(context, personale);
+                          avatarWidget = _buildAvatarFromFallback(context, effectivePersonaleForFallback);
                         }
 
-                        // Wrap the determined avatar in the PopupMenuButton
+                        final List<PopupMenuEntry<ProfileAction>> menuItems = [];
+                        if (personaleFromDb != null) {
+                          menuItems.add(const PopupMenuItem<ProfileAction>(
+                              value: ProfileAction.edit, child: ListTile(leading: Icon(Icons.edit_outlined, size: 20), title: Text('Modifica profilo', style: TextStyle(fontSize: 14)), contentPadding: EdgeInsets.symmetric(horizontal: 8), dense: true)));
+                          menuItems.add(const PopupMenuDivider(height: 1));
+                        }
+                        menuItems.addAll([
+                          const PopupMenuItem<ProfileAction>(
+                              value: ProfileAction.version, child: ListTile(leading: Icon(Icons.track_changes, size: 20), title: Text('Versione', style: TextStyle(fontSize: 14)), contentPadding: EdgeInsets.symmetric(horizontal: 8), dense: true)),
+                          const PopupMenuItem<ProfileAction>(
+                              value: ProfileAction.logout,
+                              child: ListTile(
+                                  leading: Icon(Icons.exit_to_app, color: Colors.redAccent, size: 20), title: Text('Esci', style: TextStyle(color: Colors.redAccent, fontSize: 14)), contentPadding: EdgeInsets.symmetric(horizontal: 8), dense: true)),
+                        ]);
+
                         return PopupMenuButton<ProfileAction>(
                           tooltip: "Opzioni Profilo",
-                          // Builds the menu items
-                          itemBuilder: (BuildContext context) => <PopupMenuEntry<ProfileAction>>[
-                            const PopupMenuItem<ProfileAction>(
-                                value: ProfileAction.edit, child: ListTile(leading: Icon(Icons.edit_outlined, size: 20), title: Text('Modifica profilo', style: TextStyle(fontSize: 14)), contentPadding: EdgeInsets.symmetric(horizontal: 8), dense: true)),
-                            const PopupMenuDivider(height: 1),
-                            const PopupMenuItem<ProfileAction>(
-                                value: ProfileAction.version, child: ListTile(leading: Icon(Icons.track_changes, size: 20), title: Text('Versione', style: TextStyle(fontSize: 14)), contentPadding: EdgeInsets.symmetric(horizontal: 8), dense: true)),
-                            const PopupMenuItem<ProfileAction>(
-                                value: ProfileAction.logout,
-                                child: ListTile(
-                                    leading: Icon(Icons.exit_to_app, color: Colors.redAccent, size: 20), title: Text('Esci', style: TextStyle(color: Colors.redAccent, fontSize: 14)), contentPadding: EdgeInsets.symmetric(horizontal: 8), dense: true)),
-                          ],
-                          // Handles menu item selection
-                          onSelected: (ProfileAction action) async {
+                          itemBuilder: (BuildContext context) => menuItems,
+                          onSelected: (ProfileAction action) {
                             switch (action) {
                               case ProfileAction.edit:
-                                if (ctrl.personale.value != null) {
-                                  // Use the main context for dialogs
-                                  _showProfileDialog(context, ctrl.personale.value!);
+                                if (personaleFromDb != null) {
+                                  _showProfileDialog(context, personaleFromDb);
                                 } else {
-                                  _showSnackbar(context, "Dati utente non disponibili.", isError: true);
+                                  _showSnackbar(context, "Dati utente non disponibili per la modifica.", isError: true);
                                 }
                                 break;
                               case ProfileAction.logout:
                                 AuthHelper.setLogoutReason(LogoutReason.userInitiated);
-                                //print("[HomeScreen] Logout: Avvio signOut (fire and forget)...");
+                                logInfo("[HomeScreen] Logout: ProfileAction.logout selected. Scheduling signOut after current frame.");
 
-                                // Chiamiamo signOut() ma non attendiamo (await) il suo completamento qui
-                                // per evitare di mantenere il contesto del PopupMenuButton attivo
-                                // mentre il widget potrebbe essere smontato.
-                                Supabase.instance.client.auth.signOut().then((_) {
-                                  //print("[HomeScreen] Logout: signOut promise completata (successo o fallimento gestito internamente da Supabase/listener).");
-                                  // Non fare nulla qui che dipenda dal context di HomeScreen,
-                                  // perché GoRouter dovrebbe aver già gestito il redirect.
-                                  // Se il widget è ancora montato e si vuole mostrare un messaggio di successo (raro per il logout),
-                                  // bisognerebbe farlo con cautela e controlli 'mounted'.
-                                }).catchError((error, stackTrace) {
-                                  //print("[HomeScreen] Logout: Errore esplicito durante signOut(): $error\nStack: $stackTrace");
-                                  AuthHelper.clearLastLogoutReason(); // Pulisci solo se il signOut stesso fallisce
-
-                                  // È rischioso usare 'context' qui perché il widget potrebbe essere smontato.
-                                  // Loggare l'errore è la cosa più sicura.
-                                  // Se si volesse tentare una Snackbar, bisognerebbe farlo con estrema cautela:
-                                  // if (mounted && context.findRenderObject() != null && context.findRenderObject()!.attached) {
-                                  //   if (error is AuthException) {
-                                  //     SnackbarHelper.showErrorSnackbar(context, "Errore logout: ${error.message}");
-                                  //   } else if (!error.toString().contains("Looking up a deactivated widget's ancestor is unsafe")) {
-                                  //     SnackbarHelper.showErrorSnackbar(context, "Errore logout inatteso.");
-                                  //   }
-                                  // }
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  if (mounted) {
+                                    logInfo("[HomeScreen] Logout: Executing signOut from addPostFrameCallback. Widget is mounted.");
+                                    Supabase.instance.client.auth.signOut().then((_) {
+                                      logInfo("[HomeScreen] Logout: signOut Future completed (listeners will handle navigation/state).");
+                                    }).catchError((error, stackTrace) {
+                                      logInfo("[HomeScreen] Logout: Error during signOut in addPostFrameCallback: $error\nStack: $stackTrace");
+                                      if (mounted) {
+                                        AuthHelper.clearLastLogoutReason();
+                                      }
+                                    });
+                                  } else {
+                                    logInfo("[HomeScreen] Logout: Widget was unmounted before signOut in addPostFrameCallback could execute.");
+                                  }
                                 });
-
-                                // A questo punto, il PopupMenuButton si chiuderà normalmente.
-                                // L'evento onAuthStateChange (ascoltato da GoRouter e dal PersonaleController)
-                                // si occuperà della navigazione e della pulizia dello stato.
                                 break;
                               case ProfileAction.version:
-                                _showVersionDialog(context, ctrl.appVersion.value); // Show version dialog
+                                _showVersionDialog(context, ctrl.appVersion.value);
                             }
                           },
-                          offset: const Offset(0, kToolbarHeight * 0.8), // Position menu below button
+                          offset: const Offset(0, kToolbarHeight * 0.8),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          // The child is the avatar itself, which triggers the menu
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                            child: avatarWidget, // Display the avatar (or loading)
+                            child: avatarWidget,
                           ),
                         );
                       },
                     );
-                  }), // End Obx for profile avatar
+                  }),
                   const SizedBox(width: 10),
                 ],
               ),
-              //  ), // End SafeArea
             ),
-          ), // End AppBar Row
-
-          // --- Main Content Area ---
-          Expanded(
-            // The main content takes the remaining vertical space
-            child: widget.child, // Display the child widget passed to HomeScreen
           ),
-
-          // --- Bottom Row (Status Bar) ---
+          Expanded(
+            child: widget.child,
+          ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            height: 35, // Compact height
+            height: 35,
             decoration: BoxDecoration(
               border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
-              color: Theme.of(context).colorScheme.surface, // Use theme surface color
+              color: Theme.of(context).colorScheme.surface,
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Status Message (from controller)
                 Expanded(
                   child: Obx(
-                    // Listens to controller's message
                     () => Tooltip(
-                      message: ctrl.message.value, // Full message on hover
+                      message: ctrl.message.value,
                       child: Text(
-                        ctrl.message.value.isEmpty ? 'Pronto.' : ctrl.message.value, // Show default if empty
+                        ctrl.message.value.isEmpty ? 'Pronto.' : ctrl.message.value,
                         style: Theme.of(context).textTheme.bodySmall,
-                        overflow: TextOverflow.ellipsis, // Prevent overflow
+                        overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 10), // Spacer
-                // Connected Users Count (from controller)
+                const SizedBox(width: 10),
                 Obx(
-                  // Listens to connected users count
                   () => Text(
                     '${ctrl.connectedUsers.value} utenti',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
-                const SizedBox(width: 10), // Spacer
-                // App Version (from controller)
+                const SizedBox(width: 10),
                 Obx(() => TextButton(
-                      // Make version clickable for AboutDialog
                       style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       onPressed: () {
                         showAboutDialog(
@@ -709,12 +674,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       },
                       child: Text(
                         'v${ctrl.appVersion.value.isNotEmpty ? ctrl.appVersion.value : "N/A"}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.secondary), // Use accent color
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.secondary),
                       ),
                     )),
               ],
             ),
-          ), // End Status Bar
+          ),
         ],
       ),
     );
