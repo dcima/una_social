@@ -2,10 +2,12 @@
 // ignore_for_file: avoid_print, deprecated_member_use, unused_element
 
 import 'dart:async';
+// import 'dart:convert'; // RIMOSSO: Questo import non era utilizzato.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Per FilteringTextInputFormatter
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/helpers/auth_helper.dart'; // Importa l'helper
+import 'package:una_social/helpers/logger_helper.dart';
 import 'package:una_social/helpers/snackbar_helper.dart'; // Per la Snackbar
 
 final supabase = Supabase.instance.client;
@@ -69,7 +71,6 @@ class _LoginScreenState extends State<LoginScreen> {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) {
       // La validazione del form mostrerà i messaggi di errore nei TextFormField
-      //print("Form validation failed for Email/Password sign in.");
       return;
     }
     if (mounted) {
@@ -81,7 +82,6 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text.trim(),
       );
       // Se il login ha successo, GoRouter gestirà il redirect.
-      // Pulisci qualsiasi ragione di logout precedente, dato che l'utente sta tentando un nuovo login.
       AuthHelper.clearLastLogoutReason();
     } on AuthException catch (e) {
       if (mounted) {
@@ -104,19 +104,14 @@ class _LoginScreenState extends State<LoginScreen> {
     final email = _emailController.text.trim();
     final otp = _otpController.text.trim();
 
-    // Validazione preliminare, anche se il validator del form per OTP fa già qualcosa
-    if (email.isEmpty) {
-      _formKey.currentState?.validate(); // Forza la validazione dell'email se vuota
-      SnackbarHelper.showErrorSnackbar(context, 'Inserisci un\'email per verificare il codice.');
-      return;
-    } else if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$").hasMatch(email)) {
-      _formKey.currentState?.validate(); // Forza la validazione dell'email se non valida
+    if (email.isEmpty || !RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$").hasMatch(email)) {
+      _formKey.currentState?.validate();
       SnackbarHelper.showErrorSnackbar(context, 'Inserisci un\'email valida per verificare il codice.');
       return;
     }
 
     if (otp.isEmpty || otp.length != 6 || !RegExp(r'^[0-9]+$').hasMatch(otp)) {
-      _formKey.currentState?.validate(); // Forza la validazione del campo OTP
+      _formKey.currentState?.validate();
       SnackbarHelper.showErrorSnackbar(context, 'Inserisci un codice di invito valido (6 cifre).');
       return;
     }
@@ -133,7 +128,6 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         SnackbarHelper.showSuccessSnackbar(context, 'Invito verificato con successo! Verrai reindirizzato.');
       }
-      // Se la verifica ha successo, GoRouter gestirà il redirect.
       AuthHelper.clearLastLogoutReason();
     } on AuthException catch (e) {
       if (mounted) {
@@ -150,6 +144,60 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // --- NUOVA FUNZIONE PER IL LOGIN PERSONALIZZATO ---
+  Future<void> _signInAsPersonaleUnibo() async {
+    FocusScope.of(context).unfocus();
+    final email = _emailController.text.trim();
+
+    if (email.isEmpty || !email.endsWith('@unibo.it')) {
+      SnackbarHelper.showErrorSnackbar(context, 'Inserisci un\'email valida del dominio @unibo.it');
+      return;
+    }
+
+    if (mounted) setState(() => _isLoading = true);
+
+    try {
+      // Chiama la funzione RPC creata nel database
+      final response = await supabase.rpc(
+        'login_as_personale',
+        params: {'user_email': email},
+      );
+
+      // La funzione RPC restituisce un JSON. Se contiene un errore, mostralo.
+      if (response['error'] != null) {
+        appLogger.error('Errore RPC: ${response['error']}');
+        throw Exception(response['error']);
+      }
+
+      // Estrai i dati della sessione dalla risposta
+      final user = User.fromJson(response['user']);
+      final session = Session.fromJson(response['session']);
+
+      // --- CORREZIONE 1: Gestione del refreshToken nullo ---
+      final refreshToken = session!.refreshToken;
+      if (refreshToken == null) {
+        throw Exception('Login fallito: refresh token non ricevuto dal server.');
+      }
+
+      // Imposta manualmente la sessione nel client Supabase.
+      await supabase.auth.setSession(refreshToken);
+
+      if (mounted) {
+        // --- CORREZIONE 2: Gestione dell'email nulla ---
+        SnackbarHelper.showSuccessSnackbar(context, 'Accesso come ${user!.email ?? 'utente sconosciuto'} riuscito!');
+      }
+    } catch (e) {
+      if (mounted) {
+        SnackbarHelper.showErrorSnackbar(context, 'Errore accesso personale: ${e.toString()}');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+  // --- FINE NUOVA FUNZIONE ---
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -161,7 +209,7 @@ class _LoginScreenState extends State<LoginScreen> {
             constraints: const BoxConstraints(maxWidth: 400),
             child: Form(
               key: _formKey,
-              autovalidateMode: AutovalidateMode.onUserInteraction, // <-- MODIFICA CHIAVE
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -185,8 +233,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (value == null || value.isEmpty) {
                         return 'Inserisci un\'email';
                       }
-                      // Regex semplice per il formato email. Per una validazione RFC completa, la regex è molto più complessa.
-                      // Questa copre la maggior parte dei casi comuni: qualcosa@qualcosa.dominio
                       final emailRegex = RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$");
                       if (!emailRegex.hasMatch(value)) {
                         return 'Inserisci un\'email valida';
@@ -214,9 +260,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       }
                     },
                     validator: (value) {
-                      // Se il campo OTP è compilato, la password non è strettamente obbligatoria
-                      // per questo validator, dato che l'utente potrebbe voler usare l'OTP.
-                      // La logica in _signIn() si occuperà di richiederla se necessario.
                       if (_otpController.text.trim().isEmpty) {
                         if (value == null || value.isEmpty) {
                           return 'Inserisci la password';
@@ -233,6 +276,30 @@ class _LoginScreenState extends State<LoginScreen> {
                     onPressed: _isLoading ? null : _signIn,
                     child: _isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Accedi'),
                   ),
+
+                  // --- NUOVO WIDGET PER IL LOGIN PERSONALIZZATO ---
+                  const SizedBox(height: 15),
+                  const Row(
+                    children: <Widget>[
+                      Expanded(child: Divider()),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10.0),
+                        child: Text("O accedi (solo test)"),
+                      ),
+                      Expanded(child: Divider()),
+                    ],
+                  ),
+                  const SizedBox(height: 15),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepOrange,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _isLoading ? null : _signInAsPersonaleUnibo,
+                    child: _isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Accedi come Personale Unibo'),
+                  ),
+                  // --- FINE NUOVO WIDGET ---
+
                   const SizedBox(height: 25),
                   const Row(
                     children: <Widget>[
@@ -269,8 +336,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         }
                       },
                       validator: (value) {
-                        // Questo validator si attiva solo se l'utente inserisce qualcosa nel campo OTP.
-                        // Non è obbligatorio se il campo è lasciato vuoto (perché l'utente potrebbe usare email/password).
                         if (value != null && value.isNotEmpty) {
                           if (value.length != 6) {
                             return 'Il codice deve essere di 6 cifre.';
