@@ -7,12 +7,14 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:una_social/controllers/auth_controller.dart'; // <-- MODIFICA: Importa AuthController
 import 'package:una_social/controllers/personale_controller.dart';
+import 'package:una_social/helpers/auth_helper.dart';
+import 'package:una_social/helpers/avatar_helper.dart';
 import 'package:una_social/helpers/db_grid.dart';
 import 'package:una_social/models/personale.dart';
 import 'package:una_social/painters/star_painter.dart';
 import 'package:una_social/screens/personale_profile.dart';
-import 'package:una_social/helpers/avatar_helper.dart'; // <-- AGGIUNGI QUESTO
 
 enum ProfileAction { edit, logout, version }
 
@@ -37,6 +39,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _appVersion = 'Caricamento...';
   String _buildNumber = '';
   final PersonaleController ctrl = Get.put(PersonaleController());
+
+  // <-- MODIFICA: Ottieni un'istanza del controller di autenticazione
+  final AuthController authController = Get.find<AuthController>();
 
   @override
   void initState() {
@@ -66,12 +71,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // FIX: This now correctly checks the type and returns the correct interface.
   DBGridControl? _getDbGridControl() {
     if (widget.child is DBGridProvider) {
       final provider = widget.child as DBGridProvider;
       final state = provider.dbGridWidgetKey.currentState;
-      // The state itself IS the control, so we check its type and return it.
       if (state is DBGridControl) {
         return state as DBGridControl;
       }
@@ -145,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // <-- MODIFICA: Il metodo _buildDrawer ora è aggiornato per essere reattivo
   Widget _buildDrawer(BuildContext context, double drawerWidth, double starGraphicSize, double starRadius) {
     final chatExpansionController = ExpansionTileController();
     return Drawer(
@@ -170,18 +174,28 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 8),
               const Divider(),
               Expanded(
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  children: [
-                    ListTile(leading: const Icon(Icons.home_outlined), title: const Text('Home'), onTap: () => GoRouter.of(context).go('/app/home')),
-                    ExpansionTile(
-                      controller: chatExpansionController,
-                      leading: const Icon(Icons.chat),
-                      title: const Text("Chat"),
-                      children: [ListTile(title: Text("..."))],
-                    )
-                  ],
-                ),
+                // <-- MODIFICA: Usiamo Obx per rendere la lista reattiva
+                child: Obx(() => ListView(
+                      padding: EdgeInsets.zero,
+                      children: [
+                        ListTile(leading: const Icon(Icons.home_outlined), title: const Text('Home'), onTap: () => GoRouter.of(context).go('/app/home')),
+
+                        // <-- MODIFICA: Aggiunta condizionale della voce di menu "Database"
+                        if (authController.isSuperAdmin.value == true)
+                          ListTile(
+                            leading: const Icon(Icons.storage_outlined), // Icona per il database
+                            title: const Text('Database'),
+                            onTap: () => GoRouter.of(context).go('/app/database'),
+                          ),
+
+                        ExpansionTile(
+                          controller: chatExpansionController,
+                          leading: const Icon(Icons.chat),
+                          title: const Text("Chat"),
+                          children: [ListTile(title: const Text("..."))],
+                        ),
+                      ],
+                    )),
               ),
             ],
           ),
@@ -265,7 +279,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                 }
                                 break;
                               case ProfileAction.logout:
-                                if (mounted) Supabase.instance.client.auth.signOut();
+                                if (mounted) {
+                                  final currentUser = Supabase.instance.client.auth.currentUser;
+                                  if (currentUser?.email != null) {
+                                    AuthHelper.lastUsedEmail = currentUser!.email;
+                                  }
+                                  // <-- MODIFICA: Pulisci i permessi prima del signOut!
+                                  authController.clearUserPermissions();
+                                  Supabase.instance.client.auth.signOut();
+                                }
                                 break;
                               case ProfileAction.version:
                                 _showVersionDialog();

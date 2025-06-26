@@ -10,6 +10,7 @@ enum LogoutReason {
 
 class AuthHelper {
   static LogoutReason _lastLogoutReason = LogoutReason.none;
+  static String? lastUsedEmail;
 
   static LogoutReason get lastLogoutReason => _lastLogoutReason;
 
@@ -23,5 +24,9 @@ class AuthHelper {
       //print("[AuthHelper] LogoutReason resettata da: $_lastLogoutReason a none.");
       _lastLogoutReason = LogoutReason.none;
     }
+  }
+
+  static void clearLastUsedEmail() {
+    lastUsedEmail = null;
   }
 }

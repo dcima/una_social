@@ -5,6 +5,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:logging/logging.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/painters/star_painter.dart';
 
 const Color primaryBlue = Color(0xFF0028FF);
@@ -51,6 +53,14 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
   @override
   void initState() {
     super.initState();
+    // Inizializza TUTTO ciò che serve al build method, SEMPRE.
+    _initializeAnimations();
+    // Poi, avvia la logica di decisione.
+    _decideFlow();
+  }
+
+  void _initializeAnimations() {
+    // Questo codice viene eseguito sempre, così il build() non andrà mai in crash.
     _mainController = AnimationController(
       duration: Duration(seconds: widget.durationInSeconds - 2),
       vsync: this,
@@ -60,7 +70,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
       vsync: this,
     );
 
-    // Animations setup...
+    // Setup di tutte le animazioni (copiato dalla sua logica precedente)
     _starRotationAnimation = Tween<double>(begin: 0.0, end: 2 * pi).animate(
       CurvedAnimation(parent: _mainController, curve: const Interval(0.0, 0.4, curve: Curves.easeInOut)),
     );
@@ -112,6 +122,25 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
         _startPulsing();
       }
     });
+  }
+
+  Future<void> _decideFlow() async {
+    // Dà il tempo a Supabase di inizializzarsi
+    await Future.delayed(const Duration(milliseconds: 100));
+    if (!mounted) return;
+
+    final session = Supabase.instance.client.auth.currentSession;
+
+    if (session == null) {
+      // CASO A: AVVIO NORMALE. Fai partire l'animazione.
+      Logger('SplashScreen').info('Sessione NULL: AVVIO NORMALE. Avvio animazione.');
+      // L'animazione partirà quando il LayoutBuilder calcola le dimensioni.
+    } else {
+      // CASO B: REDIRECT DA INVITO. Non fare nulla.
+      // L'animazione non partirà perché non chiamiamo `_mainController.forward()`.
+      // La UI rimarrà statica mentre GoRouter fa il suo redirect.
+      Logger('SplashScreen').info('Sessione trovata! È un redirect da invito. Animazione non avviata.');
+    }
   }
 
   Future<void> _startPulsing() async {

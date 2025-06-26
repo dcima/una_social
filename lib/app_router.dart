@@ -1,50 +1,24 @@
 // lib/app_router.dart
 // ignore_for_file: avoid_print
 
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_chat/screens/una_chat_main_screen.dart';
+import 'package:una_social/controllers/auth_controller.dart'; // <-- IMPORTA IL CONTROLLER AGGIORNATO
 import 'package:una_social/helpers/logger_helper.dart'; // Assicurati che esista
-import 'dart:async';
-
-// Importa le tue schermate
+import 'package:una_social/screens/database_screen.dart';
 import 'package:una_social/screens/home_screen.dart';
 import 'package:una_social/screens/login_screen.dart';
 import 'package:una_social/screens/set_password_screen.dart';
 import 'package:una_social/screens/splash_screen.dart';
-import 'package:una_social/screens/database_screen.dart';
 import 'package:una_social/screens/strutture_screen.dart';
 import 'package:una_social/screens/unauthorized_screen.dart';
 
 final _supabase = Supabase.instance.client;
-
-// Helper ASINCRONO per verificare se l'utente è SUPER-ADMIN (invariato)
-Future<bool> checkCurrentUserIsSuperAdmin() async {
-  if (_supabase.auth.currentUser == null) {
-    logError("[AppRouter] checkCurrentUserIsSuperAdmin: Utente nullo, non può essere Super Admin.");
-    return false;
-  }
-  try {
-    const String superAdminGroupName = 'SUPER-ADMIN';
-    logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Chiamata RPC 'current_user_is_in_group' con parametro '$superAdminGroupName'");
-    final dynamic response = await _supabase.rpc(
-      'current_user_is_in_group',
-      params: {'group_name_param': superAdminGroupName},
-    );
-    if (response is bool) {
-      final bool isAdmin = response;
-      logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Risultato RPC (boolean): $isAdmin");
-      return isAdmin;
-    } else {
-      logError("[AppRouter] checkCurrentUserIsSuperAdmin: Risposta RPC non è booleana, tipo: ${response.runtimeType}, Data: $response. Considerato non admin.");
-      return false;
-    }
-  } catch (e) {
-    logInfo("[AppRouter] checkCurrentUserIsSuperAdmin: Errore durante chiamata RPC: $e");
-    return false;
-  }
-}
+final AuthController authController = Get.put(AuthController());
 
 // GoRouterRefreshStream (invariato)
 class GoRouterRefreshStream extends ChangeNotifier {
@@ -132,8 +106,6 @@ class AppRouter {
               screenName: 'Home', // Nome visualizzato nell'AppBar di HomeScreen
               child: Center(child: Text('Contenuto principale della Home')), // Widget contenuto
             ),
-            // Non c'è più bisogno del redirect specifico per auth/pwd qui,
-            // è gestito dal genitore '/app' e dal redirect globale.
           ),
           GoRoute(
             path: 'database', // Path completo: /app/database
@@ -143,11 +115,11 @@ class AppRouter {
               child: DatabaseScreen(), // DatabaseScreen è solo il contenuto
             ),
             redirect: (context, state) async {
-              // Questo redirect si attiva DOPO quello del genitore '/app'
-              // e dopo il redirect globale. Qui solo logica specifica per /app/database.
-              if (!await checkCurrentUserIsSuperAdmin()) {
+              if (!await authController.checkIsSuperAdmin()) {
                 logInfo('[GoRouter /app/database Redirect] Utente non Super Admin. Redirect a /unauthorized.');
-                return '/unauthorized'; // /unauthorized è una route di primo livello
+                const String errorMessage = 'Accesso negato. Sono richiesti privilegi di Super Amministratore.';
+                final String encodedMessage = Uri.encodeComponent(errorMessage);
+                return '/unauthorized?message=$encodedMessage';
               }
               logInfo('[GoRouter /app/database Redirect] Utente Super Admin. Accesso consentito.');
               return null;
@@ -197,12 +169,12 @@ class AppRouter {
         ],
       ),
     ],
-    // --- LOGICA DI REDIRECT GLOBALE (SINCRONA) ---
+
     redirect: (BuildContext context, GoRouterState state) {
       final user = _supabase.auth.currentUser;
       final session = _supabase.auth.currentSession;
       final bool loggedIn = session != null;
-      final bool passwordSet = user?.userMetadata?['has_set_password'] == true;
+      final bool passwordSet = user?.userMetadata?['has_set_password'] as bool? ?? false;
 
       final String currentMatchedLocation = state.matchedLocation; // Es. '/', '/login', '/app/home'
       final String requestedUri = state.uri.toString(); // L'URI completo, es. /app/home?param=1
@@ -214,6 +186,8 @@ class AppRouter {
       // La root '/' è speciale, la gestiamo come /splash
       final bool onPublicPath = publicPaths.contains(currentMatchedLocation) || currentMatchedLocation == '/';
       final bool onSetPasswordPath = currentMatchedLocation == '/set-password';
+
+      logInfo('[aaaaa] currentMatchedLocation: $currentMatchedLocation, loggedIn: $loggedIn, passwordSet: $passwordSet, onPublicPath: $onPublicPath, onSetPasswordPath: $onSetPasswordPath');
 
       if (!loggedIn) {
         // UTENTE NON LOGGATO

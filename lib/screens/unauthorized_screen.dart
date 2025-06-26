@@ -41,7 +41,7 @@ class UnauthorizedScreen extends StatelessWidget {
                   if (GoRouter.of(context).canPop()) {
                     GoRouter.of(context).pop();
                   } else {
-                    GoRouter.of(context).go('/home');
+                    GoRouter.of(context).go('/app/home');
                   }
                 },
                 child: const Text('Torna alla Home'),
