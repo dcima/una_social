@@ -197,9 +197,9 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
 
   void _loadInitialStrutturaIfNeeded() {
     final ente = widget.initialPersonale.ente.trim();
-    final codice = widget.initialPersonale.struttura.trim();
-    if (codice.isNotEmpty && ente.isNotEmpty) {
-      _loadInitialStruttura(codice, ente);
+    final codice = widget.initialPersonale.struttura;
+    if (ente.isNotEmpty) {
+      _loadInitialStruttura(codice.toString(), ente);
     }
   }
 
@@ -325,7 +325,7 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
       'telefoni': _phoneEntries.map((e) => e.toMapForDb()).where((m) => m['v']!.isNotEmpty).toList(),
     };
     try {
-      await _supabase.from('personale').update(updateData).eq('uuid', widget.initialPersonale.uuid);
+      await _supabase.from('personale').update(updateData).eq('id', widget.initialPersonale.id);
       if (!mounted) return;
       scaffoldMessenger.showSnackBar(const SnackBar(content: Text('Profilo aggiornato!'), backgroundColor: Colors.green));
       await _personaleController.reload();

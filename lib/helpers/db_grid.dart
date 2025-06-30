@@ -577,29 +577,30 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
               },
             )),
       Expanded(
-          child: SfDataGrid(
-        key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _currentPage.toString() + _totalRecords.toString()),
-        source: _dataSource,
-        columns: _columns,
-        controller: _dataGridController,
-        allowSorting: false,
-        selectionMode: widget.config.selectable ? SelectionMode.multiple : SelectionMode.single,
-        navigationMode: GridNavigationMode.cell,
-        frozenColumnsCount: widget.config.fixedColumnsCount + (widget.config.selectable ? 1 : 0),
-        gridLinesVisibility: GridLinesVisibility.both,
-        headerGridLinesVisibility: GridLinesVisibility.both,
-        columnWidthMode: ColumnWidthMode.auto,
-        onCellDoubleTap: _handleRowDoubleTap,
-        onCellTap: (DataGridCellTapDetails details) {
-          final int rowIndex = details.rowColumnIndex.rowIndex;
-          if (rowIndex > 0 && widget.config.selectable && details.column.columnName != '_selector') {
-            final int dataIndex = rowIndex - 1;
-            if (dataIndex >= 0 && dataIndex < _data.length) {
-              _dataSource.handleRowSelection(_data[dataIndex]);
+        child: SfDataGrid(
+          key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _currentPage.toString() + _totalRecords.toString()),
+          source: _dataSource,
+          columns: _columns,
+          controller: _dataGridController,
+          allowSorting: false,
+          selectionMode: widget.config.selectable ? SelectionMode.multiple : SelectionMode.single,
+          navigationMode: GridNavigationMode.cell,
+          frozenColumnsCount: widget.config.fixedColumnsCount + (widget.config.selectable ? 1 : 0),
+          gridLinesVisibility: GridLinesVisibility.both,
+          headerGridLinesVisibility: GridLinesVisibility.both,
+          columnWidthMode: ColumnWidthMode.auto,
+          onCellDoubleTap: _handleRowDoubleTap,
+          onCellTap: (DataGridCellTapDetails details) {
+            final int rowIndex = details.rowColumnIndex.rowIndex;
+            if (rowIndex > 0 && widget.config.selectable && details.column.columnName != '_selector') {
+              final int dataIndex = rowIndex - 1;
+              if (dataIndex >= 0 && dataIndex < _data.length) {
+                _dataSource.handleRowSelection(_data[dataIndex]);
+              }
             }
-          }
-        },
-      )),
+          },
+        ),
+      ),
       _buildPaginationControls(),
     ]);
   }

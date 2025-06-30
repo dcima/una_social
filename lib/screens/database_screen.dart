@@ -4,6 +4,7 @@
 import 'dart:convert';
 import 'dart:typed_data'; // For Uint8List with file_saver
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:csv/csv.dart'; // For CSV generation
 import 'package:file_saver/file_saver.dart';
@@ -169,6 +170,55 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
     }
   }
 
+  Widget buildCard(BuildContext context, String tableName) {
+    // Costruisce una Card per ogni tabella
+    // Puoi personalizzare ulteriormente l'aspetto della Card qui
+    // Ad esempio, aggiungendo un'icona o un'azione specifica per la tabella
+
+    // Se vuoi mostrare il numero di righe, puoi passarlo come parametro o calcolarlo in anticipo
+    // Per ora, usiamo una stringa fittizia per il conteggio delle righe
+    // final rowCount = _tableNames.length; // Supponiamo che ogni tabella abbia lo stesso numero di righe
+    return GestureDetector(
+      child: Card(
+        elevation: 2,
+        margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
+        child: ListTile(
+          leading: Icon(Icons.table_rows_outlined, color: Theme.of(context).colorScheme.primary),
+          title: Text(tableName, style: const TextStyle(fontWeight: FontWeight.w500)),
+          trailing: PopupMenuButton<ExportFormat>(
+            icon: Icon(Icons.file_download_outlined, color: Theme.of(context).colorScheme.secondary),
+            tooltip: 'Opzioni di Esportazione per $tableName',
+            onSelected: (ExportFormat format) {
+              _exportTable(tableName, format);
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<ExportFormat>>[
+              PopupMenuItem<ExportFormat>(
+                value: ExportFormat.csv,
+                child: Row(children: [const Icon(Icons.grid_on_sharp, size: 20), const SizedBox(width: 10), Text('CSV (${_tableNames.length} righe)')]),
+              ),
+              PopupMenuItem<ExportFormat>(
+                value: ExportFormat.json,
+                child: Row(children: [const Icon(Icons.data_object_rounded, size: 20), const SizedBox(width: 10), Text('JSON (${_tableNames.length} righe)')]),
+              ),
+              PopupMenuItem<ExportFormat>(
+                value: ExportFormat.sql,
+                child: Row(children: [const Icon(Icons.code_rounded, size: 20), const SizedBox(width: 10), Text('SQL (INSERTs, ${_tableNames.length} righe)')]),
+              ),
+            ],
+          ),
+          onTap: () {
+            // Potresti aggiungere un'azione qui, tipo navigare a una vista dettagliata della tabella
+            //print("Selezionata tabella: $tableName");
+            SnackbarHelper.showInfoSnackbar(context, "Un tap selezionata tabella: $tableName, doppio tap per aprire tabella e gestione. Usa il menu per esportare.");
+          },
+        ),
+      ),
+      onDoubleTap: () {
+        GoRouter.of(context).go('/app/$tableName');
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoadingTables) {
@@ -249,40 +299,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
         itemCount: _tableNames.length,
         itemBuilder: (context, index) {
           final tableName = _tableNames[index];
-          return Card(
-            elevation: 2,
-            margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
-            child: ListTile(
-              leading: Icon(Icons.table_rows_outlined, color: Theme.of(context).colorScheme.primary),
-              title: Text(tableName, style: const TextStyle(fontWeight: FontWeight.w500)),
-              trailing: PopupMenuButton<ExportFormat>(
-                icon: Icon(Icons.file_download_outlined, color: Theme.of(context).colorScheme.secondary),
-                tooltip: 'Opzioni di Esportazione per $tableName',
-                onSelected: (ExportFormat format) {
-                  _exportTable(tableName, format);
-                },
-                itemBuilder: (BuildContext context) => <PopupMenuEntry<ExportFormat>>[
-                  PopupMenuItem<ExportFormat>(
-                    value: ExportFormat.csv,
-                    child: Row(children: [const Icon(Icons.grid_on_sharp, size: 20), const SizedBox(width: 10), Text('CSV (${_tableNames.length} righe)')]),
-                  ),
-                  PopupMenuItem<ExportFormat>(
-                    value: ExportFormat.json,
-                    child: Row(children: [const Icon(Icons.data_object_rounded, size: 20), const SizedBox(width: 10), Text('JSON (${_tableNames.length} righe)')]),
-                  ),
-                  PopupMenuItem<ExportFormat>(
-                    value: ExportFormat.sql,
-                    child: Row(children: [const Icon(Icons.code_rounded, size: 20), const SizedBox(width: 10), Text('SQL (INSERTs, ${_tableNames.length} righe)')]),
-                  ),
-                ],
-              ),
-              onTap: () {
-                // Potresti aggiungere un'azione qui, tipo navigare a una vista dettagliata della tabella
-                //print("Selezionata tabella: $tableName");
-                SnackbarHelper.showInfoSnackbar(context, "Selezionata tabella: $tableName. Usa il menu per esportare.");
-              },
-            ),
-          );
+          return buildCard(context, tableName);
         },
         separatorBuilder: (context, index) => const SizedBox(height: 0), // Nessun separatore visibile tra le Card
       ),

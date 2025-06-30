@@ -26,6 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isPasswordObscured = true;
   bool _isEmailValidForRegistration = false; // Stato per la visibilità del pulsante di registrazione
 
+  final _emailFocusNode = FocusNode();
   final _passwordFocusNode = FocusNode();
 
   StreamSubscription<AuthState>? _authStateSubscription;
@@ -38,6 +39,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
     // Aggiungi un listener al controller dell'email per aggiornare la UI
     _emailController.addListener(_validateEmailForRegistration);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _emailFocusNode.requestFocus();
+      }
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && AuthHelper.lastLogoutReason == LogoutReason.invalidRefreshToken) {
@@ -60,6 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _emailFocusNode.dispose();
     _passwordFocusNode.dispose();
     _emailController.removeListener(_validateEmailForRegistration); // Rimuovi il listener
     _emailController.dispose();
@@ -181,6 +188,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 30),
                   TextFormField(
                     controller: _emailController,
+                    focusNode: _emailFocusNode,
                     decoration: const InputDecoration(labelText: 'Email'),
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,

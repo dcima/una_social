@@ -148,7 +148,16 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // <-- MODIFICA: Il metodo _buildDrawer ora è aggiornato per essere reattivo
+  List<Widget> getSistema(BuildContext context, AuthController authController) {
+    return [
+      ListTile(
+        leading: const Icon(Icons.data_object_outlined),
+        title: const Text('Database'),
+        onTap: () => GoRouter.of(context).go('/app/database'),
+      ),
+    ];
+  }
+
   Widget _buildDrawer(BuildContext context, double drawerWidth, double starGraphicSize, double starRadius) {
     final chatExpansionController = ExpansionTileController();
     return Drawer(
@@ -178,15 +187,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Obx(() => ListView(
                       padding: EdgeInsets.zero,
                       children: [
-                        ListTile(leading: const Icon(Icons.home_outlined), title: const Text('Home'), onTap: () => GoRouter.of(context).go('/app/home')),
+                        ListTile(
+                          leading: const Icon(Icons.home_outlined),
+                          title: const Text('Home'),
+                          onTap: () => GoRouter.of(context).go('/app/home'),
+                        ),
 
-                        // <-- MODIFICA: Aggiunta condizionale della voce di menu "Database"
-                        if (authController.isSuperAdmin.value == true)
-                          ListTile(
-                            leading: const Icon(Icons.storage_outlined), // Icona per il database
-                            title: const Text('Database'),
-                            onTap: () => GoRouter.of(context).go('/app/database'),
-                          ),
+                        if (authController.isSuperAdmin.value == true) ...getSistema(context, authController), // <-- Qui usi la funzione
 
                         ExpansionTile(
                           controller: chatExpansionController,

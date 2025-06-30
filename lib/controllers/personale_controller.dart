@@ -370,7 +370,7 @@ class PersonaleController extends GetxController {
       if (response.isNotEmpty) {
         final Map<String, dynamic> userData = response.first as Map<String, dynamic>;
         personale.value = Personale.fromJson(userData);
-        logInfo("AUTH: Personale model caricato: ${personale.value?.fullName}");
+        logInfo("AUTH: Personale model caricato: ${personale.value?.cognome}");
         message.value = 'Dati utente caricati.';
       } else {
         logInfo("AUTH: Nessun record Personale per: $email");
