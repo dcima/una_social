@@ -45,6 +45,8 @@ class AvatarHelper {
       imagePath = 'esterni/foto/$emailFileName.jpg';
     }
 
+    appLogger.info("imagePath: $imagePath");
+
     // Se non siamo riusciti a determinare un percorso, non possiamo fare nulla.
     if (imagePath == null || imagePath.isEmpty) {
       return null;

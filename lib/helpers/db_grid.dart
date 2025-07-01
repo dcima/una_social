@@ -1,11 +1,12 @@
 // lib/helpers/db_grid.dart
-// ignore_for_file: prefer_final_fields, prefer_const_constructors_in_immutables, library_private_types_in_public_api
+// ignore_for_file: prefer_final_fields, prefer_const_constructors_in_immutables, library_private_types_in_public_api, depend_on_referenced_packages
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'; // Ensure this import is correct
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 import 'package:una_social/helpers/logger_helper.dart'; // Assuming logger_helper.dart exists
 import 'package:una_social/helpers/db_grid_form_view.dart'; // Import the new form view
+import 'package:collection/collection.dart'; // Add this import for firstWhereOrNull
 
 // --------------- ENUMS E CLASSI DI CONFIGURAZIONE ---------------
 enum SortDirection { asc, desc }
@@ -131,6 +132,9 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     return true;
   }
 
+  // ##################################################################
+  // ### FINAL CORRECTED METHOD ###
+  // ##################################################################
   Future<void> _fetchData({bool isRefresh = false}) async {
     if (!mounted) return;
 
@@ -152,23 +156,37 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       final limit = widget.config.pageLength;
       final offset = fromRecord;
 
-      var query = Supabase.instance.client.from(widget.config.dataSourceTable).select('*');
-      var rangedQuery = query.range(offset, offset + limit - 1);
+      // This is the request that will be awaited. It is a Future.
+      final Future<PostgrestResponse<PostgrestList>> request;
 
-      _sortedColumnsState.forEach((columnName, direction) {
-        if (direction != null) {
-          rangedQuery = rangedQuery.order(
-            columnName,
-            ascending: direction == DataGridSortDirection.ascending,
-          );
-        }
-      });
+      // Since you only ever sort by one column, we can build the query chain
+      // conditionally. This is the clean, type-safe approach.
+      if (_sortedColumnsState.isNotEmpty && _sortedColumnsState.values.first != null) {
+        // --- Build the query chain WITH sorting ---
+        final sortColumn = _sortedColumnsState.keys.first;
+        final sortDirection = _sortedColumnsState.values.first!;
 
-      var builderForCount = rangedQuery.count(CountOption.exact);
-      final PostgrestResponse<PostgrestList> response = await builderForCount;
+        request = Supabase.instance.client
+            .from(widget.config.dataSourceTable)
+            .select() // Returns PostgrestFilterBuilder
+            .order(sortColumn, ascending: sortDirection == DataGridSortDirection.ascending) // Returns PostgrestTransformBuilder
+            .range(offset, offset + limit - 1) // Returns PostgrestTransformBuilder
+            .count(CountOption.exact); // Returns the Future
+      } else {
+        // --- Build the query chain WITHOUT sorting ---
+        request = Supabase.instance.client
+            .from(widget.config.dataSourceTable)
+            .select() // Returns PostgrestFilterBuilder
+            .range(offset, offset + limit - 1) // Returns PostgrestTransformBuilder
+            .count(CountOption.exact); // Returns the Future
+      }
+
+      // Await the fully constructed request
+      final response = await request;
 
       if (!mounted) return;
 
+      // The rest of the logic remains the same
       _data = List<Map<String, dynamic>>.from(response.data);
       _totalRecords = response.count;
 
@@ -203,13 +221,12 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         }
         _columns = _generateColumns(columnKeys);
       }
-      _dataSource.updateDataGridSource(_data); // This will also update its internal copy of _data
+      _dataSource.updateDataGridSource(_data);
 
-      // If form index was valid, try to maintain it if the record still exists
       if (_currentFormRecordIndex != -1 && _currentFormRecordIndex < (response.data as List).length) {
-        // Potentially re-validate if the data changed significantly
+        // Maintain form index if possible
       } else if (_currentUIMode == UIMode.form && _data.isNotEmpty) {
-        _currentFormRecordIndex = 0; // Default to first record if in form mode and data loaded
+        _currentFormRecordIndex = 0;
         _dataSource.clearSelections();
         _dataSource.handleRowSelection(_data[_currentFormRecordIndex], isSelected: true);
       } else {
@@ -577,33 +594,43 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
               },
             )),
       Expanded(
-        child: SfDataGrid(
-          key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _currentPage.toString() + _totalRecords.toString()),
-          source: _dataSource,
-          columns: _columns,
-          controller: _dataGridController,
-          allowSorting: false,
-          selectionMode: widget.config.selectable ? SelectionMode.multiple : SelectionMode.single,
-          navigationMode: GridNavigationMode.cell,
-          frozenColumnsCount: widget.config.fixedColumnsCount + (widget.config.selectable ? 1 : 0),
-          gridLinesVisibility: GridLinesVisibility.both,
-          headerGridLinesVisibility: GridLinesVisibility.both,
-          columnWidthMode: ColumnWidthMode.auto,
-          onCellDoubleTap: _handleRowDoubleTap,
-          onCellTap: (DataGridCellTapDetails details) {
-            final int rowIndex = details.rowColumnIndex.rowIndex;
-            if (rowIndex > 0 && widget.config.selectable && details.column.columnName != '_selector') {
-              final int dataIndex = rowIndex - 1;
-              if (dataIndex >= 0 && dataIndex < _data.length) {
-                _dataSource.handleRowSelection(_data[dataIndex]);
-              }
-            }
-          },
+        child: Center(
+          // <--- AGGIUNTO: centra la griglia orizzontalmente e verticalmente
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 800, // puoi regolare la larghezza massima a piacere
+            ),
+            child: SfDataGrid(
+              key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _currentPage.toString() + _totalRecords.toString()),
+              source: _dataSource,
+              columns: _columns,
+              controller: _dataGridController,
+              allowSorting: false,
+              selectionMode: widget.config.selectable ? SelectionMode.multiple : SelectionMode.single,
+              navigationMode: GridNavigationMode.cell,
+              frozenColumnsCount: widget.config.fixedColumnsCount + (widget.config.selectable ? 1 : 0),
+              gridLinesVisibility: GridLinesVisibility.both,
+              headerGridLinesVisibility: GridLinesVisibility.both,
+              columnWidthMode: ColumnWidthMode.auto,
+              onCellDoubleTap: _handleRowDoubleTap,
+              onCellTap: (DataGridCellTapDetails details) {
+                final int rowIndex = details.rowColumnIndex.rowIndex;
+                if (rowIndex > 0 && widget.config.selectable && details.column.columnName != '_selector') {
+                  final int dataIndex = rowIndex - 1;
+                  if (dataIndex >= 0 && dataIndex < _data.length) {
+                    _dataSource.handleRowSelection(_data[dataIndex]);
+                  }
+                }
+              },
+            ),
+          ),
         ),
       ),
       _buildPaginationControls(),
     ]);
   }
+
+//
 }
 
 // --------------- DATASOURCE PER SfDataGrid ---------------
@@ -734,13 +761,4 @@ class _DBGridDataSource extends DataGridSource {
 class NavigationService {
   // Ensure this is correctly set up in your app
   static GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-}
-
-extension IterableExtensions<E> on Iterable<E> {
-  E? firstWhereOrNull(bool Function(E) test) {
-    for (var element in this) {
-      if (test(element)) return element;
-    }
-    return null;
-  }
 }

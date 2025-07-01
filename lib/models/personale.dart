@@ -10,7 +10,7 @@ class Personale {
   final int id; // Questo 'id' è specifico dell'ente, non l'UUID primario
   final String cognome;
   final String nome;
-  String struttura; // Questo 'struttura' è l'ID della struttura all'interno dell'ente
+  int struttura; // Questo 'struttura' è l'ID della struttura all'interno dell'ente
   final String emailPrincipale;
   String? photoUrl;
   final String? cv;
@@ -133,7 +133,7 @@ class Personale {
       id: (json['id'] as num?)?.toInt() ?? 0, // id è NOT NULL
       cognome: json['cognome'] as String? ?? '', // cognome è NOT NULL
       nome: json['nome'] as String? ?? '', // nome è NOT NULL
-      struttura: json['struttura'] as String? ?? '', // struttura è NOT NULL
+      struttura: (json['struttura'] as num?)?.toInt() ?? 0, // struttura è NOT NULL
       emailPrincipale: json['email_principale'] as String? ?? '', // email_principale è NOT NULL
 
       photoUrl: json['photo_url'] as String?,

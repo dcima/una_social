@@ -1,0 +1,2 @@
+D:/Progetti/flutter_dart/una_social/android/app/.cxx/Debug/6g4410o3/x86_64/CMakeFiles/edit_cache.dir
+D:/Progetti/flutter_dart/una_social/android/app/.cxx/Debug/6g4410o3/x86_64/CMakeFiles/rebuild_cache.dir

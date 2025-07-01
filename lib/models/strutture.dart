@@ -1,8 +1,8 @@
 // models/struttura.dart
 
 class Struttura {
-  final String universita; // Mappato da "università"
-  final String id; // L'ID specifico della struttura all'interno dell'università
+  final String universita;
+  final String id;
   final String? nome;
   final String? indirizzo;
   final String? numero;
@@ -38,9 +38,8 @@ class Struttura {
 
   factory Struttura.fromJson(Map<String, dynamic> json) {
     return Struttura(
-      // Nota la mappatura da 'università' (nome colonna DB/JSON) a 'universita' (nome campo Dart)
-      universita: json['università'] as String? ?? '', // Fallback per robustezza se il JSON è malformato
-      id: json['id'] as String? ?? '', // Fallback
+      universita: json['universita'] as String? ?? '', // Fallback per robustezza se il JSON è malformato
+      id: (json['id']?.toString() ?? ''), // Fallback
       nome: json['nome'] as String?,
       indirizzo: json['indirizzo'] as String?,
       numero: json['numero'] as String?,
@@ -53,8 +52,7 @@ class Struttura {
 
   Map<String, dynamic> toJson() {
     final Map<String, dynamic> data = {
-      // Nota la mappatura da 'universita' (nome campo Dart) a 'università' (nome colonna DB/JSON)
-      'università': universita,
+      'universita': universita,
       'id': id,
       'nome': nome,
       'indirizzo': indirizzo,
