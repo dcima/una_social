@@ -193,9 +193,9 @@ class AppRouter {
             ),
           ),
           GoRoute(
-            path: 'una_chat',
+            path: 'chat',
             builder: (context, state) => HomeScreen(
-              screenName: 'Una Chat',
+              screenName: 'Chat',
               child: UnaChatMainScreen(),
             ),
           ),

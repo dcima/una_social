@@ -1,7 +1,10 @@
-import 'package:flutter/material.dart';
-import 'package:una_social/helpers/logger_helper.dart'; // Importa il logger
+// una_chat_main_screen.dart
 
-// Modello semplice per i dati di una chat (da sostituire con i tuoi modelli reali)
+import 'package:flutter/material.dart';
+import 'package:una_social/helpers/logger_helper.dart';
+import 'package:una_social/helpers/snackbar_helper.dart'; // Importa il logger
+
+// Modello semplice per i dati di una chat (invariato)
 class ChatItemModel {
   final String avatarUrl; // o AssetImage per asset locali
   final String name;
@@ -36,17 +39,18 @@ class UnaChatMainScreen extends StatefulWidget {
 class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
   int _bottomNavIndex = 0; // Per la BottomNavigationBar
 
-  // Dati di esempio, rimpiazzali con i dati reali dalla tua logica/backend
-  final List<ChatItemModel> _chatItems = [
+  // Dati di esempio (invariati)
+  final List<ChatItemModel> _chatItems = [];
+  final List<ChatItemModel> chatItems = [
     ChatItemModel(
-      avatarUrl: 'https://via.placeholder.com/150/771796', // Esempio placeholder
+      avatarUrl: 'https://placehold.co/32x32',
       name: 'Blocco Note (tu)',
       lastMessage: '✓ https://www.facebook.com...',
       time: 'Ieri',
       isPinned: true,
     ),
     ChatItemModel(
-      avatarUrl: 'https://via.placeholder.com/150/24f355', // Esempio placeholder
+      avatarUrl: 'https://placehold.co/32x32',
       name: 'A35-Accademia Capital O...',
       lastMessage: 'Stefano Fontana: Questo...',
       time: '11:58',
@@ -56,7 +60,7 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
       lastMessageSender: 'Stefano Fontana',
     ),
     ChatItemModel(
-      avatarUrl: 'group_avatar', // Usa un placeholder per l'icona di gruppo
+      avatarUrl: 'group_avatar',
       name: 'Regalo Fiorella',
       lastMessage: 'Morena: Stasera faccio il pu...',
       time: '11:56',
@@ -65,7 +69,7 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
       lastMessageSender: 'Morena',
     ),
     ChatItemModel(
-      avatarUrl: 'https://via.placeholder.com/150/f66b97', // Esempio placeholder
+      avatarUrl: 'https://via.placeholder.com/150/f66b97',
       name: 'Gli Svalvolati',
       lastMessage: 'Parà: Buongiorno✌️',
       time: '11:46',
@@ -75,104 +79,80 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
       lastMessageSender: 'Parà',
     ),
     ChatItemModel(
-      avatarUrl: 'https://via.placeholder.com/150/56a8c2', // Esempio placeholder
+      avatarUrl: 'https://via.placeholder.com/150/56a8c2',
       name: '5A Majorana',
       lastMessage: 'cristina martelli68: Noi nn v...',
-      time: '11:33', // Orario tagliato nell'immagine
-      unreadCount: 99, // Esempio per un numero alto
+      time: '11:33',
+      unreadCount: 99,
       isGroup: true,
       lastMessageSender: 'cristina martelli68',
     ),
     ChatItemModel(
-      avatarUrl: 'https://via.placeholder.com/150/b0f7cc', // Esempio placeholder
+      avatarUrl: 'https://via.placeholder.com/150/b0f7cc',
       name: 'Sorina Popa',
       lastMessage: '✓ 💋💋💋 LIFE SAVER!!!',
-      time: '11:30', // Orario ipotetico
+      time: '11:30',
     ),
   ];
 
-  String _selectedFilter = "Tutti"; // Potrebbe essere 'Preferiti', 'Gruppi', ecc.
+  String _selectedFilter = "Tutti";
 
   @override
   Widget build(BuildContext context) {
-    // Filtraggio basato su _selectedFilter (molto basilare)
-    List<ChatItemModel> filteredItems = _chatItems; // Inizialmente tutti
+    // MODIFICA: Otteniamo il tema corrente per accedere ai suoi colori e stili
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    // Logica di filtraggio (invariata)
+    List<ChatItemModel> filteredItems = _chatItems;
     if (_selectedFilter == "Gruppi") {
       filteredItems = _chatItems.where((item) => item.isGroup).toList();
     } else if (_selectedFilter == "Preferiti") {
-      // Logica per i preferiti (es. basata su isPinned o un altro flag)
-      // Per ora mostriamo i pinnati come preferiti
       filteredItems = _chatItems.where((item) => item.isPinned).toList();
     }
-    // Aggiungi altri filtri se necessario
 
     return Scaffold(
-      backgroundColor: Colors.black87, // Sfondo scuro come da screenshot
-      appBar: AppBar(
-        backgroundColor: Colors.grey[900], // Colore AppBar più scuro
-        title: const Text(
-          'WhatsApp', // O 'Una Chat' o quello che preferisci
-          style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.camera_alt_outlined, color: Colors.white70),
-            onPressed: () {
-              // Azione fotocamera
-            },
-          ),
-          // L'icona di ricerca è nella barra sotto l'AppBar nello screenshot
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.white70),
-            onPressed: () {
-              // Azione menu
-            },
-          ),
-        ],
-        elevation: 0, // Come da stile WhatsApp
-      ),
+      // MODIFICA: lo scaffold usa il suo colore di sfondo dal tema
+      // backgroundColor: Colors.black87, <-- Rimosso
       body: Column(
         children: [
-          // Barra di ricerca (come "Chiedi a Meta AI o cerca")
+          // Barra di ricerca
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
             child: TextField(
+              // MODIFICA: La decorazione ora è definita nel tema globale (main.dart)
+              // ma possiamo ancora personalizzare se necessario.
               decoration: InputDecoration(
-                hintText: 'Chiedi a Meta AI o cerca',
-                hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
-                filled: true,
-                fillColor: Colors.grey[800], // Colore di sfondo della barra
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30.0),
-                  borderSide: BorderSide.none,
-                ),
+                hintText: 'Cerca',
+                hintStyle: TextStyle(color: theme.hintColor),
+                prefixIcon: Icon(Icons.search, color: theme.hintColor),
+                fillColor: colorScheme.surfaceVariant, // Usa un colore di sfondo dal tema
                 contentPadding: const EdgeInsets.symmetric(vertical: 0.0),
               ),
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: colorScheme.onSurface), // Colore testo dal tema
             ),
           ),
-          // Filtri (Preferiti, Gruppi, Famiglia, +)
+          // Filtri
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _buildFilterChip("Tutti", Icons.chat_bubble_outline), // Aggiunto un "Tutti"
+                  _buildFilterChip("Tutti", Icons.chat_bubble_outline),
                   _buildFilterChip("Preferiti", Icons.star_border_outlined),
-                  _buildFilterChip("Gruppi 4", Icons.group_outlined), // "4" è un esempio
-                  _buildFilterChip("Famiglia", Icons.home_outlined), // Icona esempio
+                  _buildFilterChip("Gruppi", Icons.group_outlined),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4.0),
                     child: ActionChip(
-                      avatar: const Icon(Icons.add, size: 18, color: Colors.white70),
-                      label: const Text(''), // Nello screenshot è solo un +
-                      backgroundColor: Colors.grey[800],
+                      // MODIFICA: Usa i colori del tema
+                      avatar: Icon(Icons.add, size: 18, color: theme.chipTheme.iconTheme?.color),
+                      label: const Text(''),
+                      backgroundColor: theme.chipTheme.backgroundColor,
                       shape: const StadiumBorder(),
                       padding: const EdgeInsets.all(6),
                       onPressed: () {
-                        // Azione per aggiungere filtro o altro
+                        SnackbarHelper.showInfoSnackbar(context, "Adesso ci penso ....");
                       },
                     ),
                   )
@@ -192,46 +172,40 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
           ),
         ],
       ),
+      // MODIFICA: Il FAB ora usa lo stile definito nel tema
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // Azione nuova chat
-        },
-        backgroundColor: const Color(0xFF00A884), // Verde WhatsApp
-        child: const Icon(Icons.message_outlined, color: Colors.white), // Icona più simile a quella di WhatsApp
+        onPressed: () {},
+        child: const Icon(Icons.message_outlined),
       ),
+      // MODIFICA: La BottomNav ora usa lo stile definito nel tema
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _bottomNavIndex,
         onTap: (index) {
           setState(() {
             _bottomNavIndex = index;
           });
-          // Qui puoi gestire la navigazione o il cambio di vista
         },
-        type: BottomNavigationBarType.fixed, // Per vedere etichette e icone sempre
-        backgroundColor: Colors.grey[900], // Sfondo della BottomNav
-        selectedItemColor: Colors.white, // Colore dell'item selezionato
-        unselectedItemColor: Colors.grey[600], // Colore degli item non selezionati
+        type: BottomNavigationBarType.fixed,
         selectedLabelStyle: const TextStyle(fontSize: 12),
         unselectedLabelStyle: const TextStyle(fontSize: 12),
         items: [
           BottomNavigationBarItem(
             icon: Badge(
-              // Per mostrare il contatore notifiche sull'icona Chat
               label: Text(_chatItems.where((c) => c.unreadCount > 0).fold<int>(0, (prev, e) => prev + e.unreadCount).toString()),
-              isLabelVisible: _chatItems.any((c) => c.unreadCount > 0), // Mostra solo se ci sono non letti
+              isLabelVisible: _chatItems.any((c) => c.unreadCount > 0),
               child: const Icon(Icons.chat_bubble),
             ),
             label: 'Chat',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.camera_enhance_outlined), // Simile all'icona "Aggiornamenti" (stato)
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.camera_enhance_outlined),
             label: 'Aggiorname...',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.groups_outlined),
             label: 'Community',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.call_outlined),
             label: 'Chiamate',
           ),
@@ -241,12 +215,21 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
   }
 
   Widget _buildFilterChip(String label, IconData icon) {
-    final bool isSelected = _selectedFilter == label.split(" ")[0]; // Semplice check sul nome base
+    // MODIFICA: Otteniamo il tema anche qui
+    final theme = Theme.of(context);
+    final chipTheme = theme.chipTheme;
+    final bool isSelected = _selectedFilter == label.split(" ")[0];
+
+    // MODIFICA: Usiamo i colori e stili del ChipTheme definito in main.dart
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4.0),
       child: FilterChip(
-        avatar: Icon(icon, size: 18, color: isSelected ? Colors.black87 : Colors.white70),
-        label: Text(label, style: TextStyle(color: isSelected ? Colors.black87 : Colors.white70)),
+        avatar: Icon(
+          icon,
+          size: 18,
+          color: isSelected ? chipTheme.secondaryLabelStyle?.color : chipTheme.iconTheme?.color,
+        ),
+        label: Text(label, style: isSelected ? chipTheme.secondaryLabelStyle : chipTheme.labelStyle),
         selected: isSelected,
         onSelected: (bool selected) {
           if (selected) {
@@ -255,37 +238,42 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
             });
           }
         },
-        backgroundColor: Colors.grey[800],
-        selectedColor: Colors.white70, // Colore del chip selezionato
-        checkmarkColor: Colors.black87,
+        backgroundColor: chipTheme.backgroundColor,
+        selectedColor: chipTheme.selectedColor,
+        checkmarkColor: chipTheme.secondaryLabelStyle?.color,
         shape: const StadiumBorder(),
       ),
     );
   }
 
   Widget _buildChatItem(ChatItemModel item) {
+    // MODIFICA: Otteniamo il tema per usare i colori corretti
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return ListTile(
       leading: CircleAvatar(
         radius: 25,
-        backgroundColor: Colors.grey[700], // Colore di sfondo per l'avatar
-        // Se avatarUrl è un path locale per un'icona di gruppo:
+        backgroundColor: theme.cardColor, // Colore di sfondo per l'avatar dal tema
         child: item.avatarUrl == 'group_avatar'
-            ? Icon(Icons.group, color: Colors.grey[400], size: 30)
+            ? Icon(Icons.group, color: theme.hintColor, size: 30)
             : item.avatarUrl.startsWith('http')
                 ? ClipOval(child: Image.network(item.avatarUrl, fit: BoxFit.cover, width: 50, height: 50))
-                : ClipOval(child: Image.asset(item.avatarUrl, fit: BoxFit.cover, width: 50, height: 50)), // Per asset locali
+                : ClipOval(child: Image.asset(item.avatarUrl, fit: BoxFit.cover, width: 50, height: 50)),
       ),
       title: Text(
         item.name,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+        // MODIFICA: Colore del testo principale dal tema
+        style: TextStyle(color: colorScheme.onSurface, fontWeight: FontWeight.w500),
       ),
       subtitle: Row(
         children: [
-          if (item.lastMessage.startsWith('✓')) // Per le spunte blu/grigie
+          if (item.lastMessage.startsWith('✓'))
             Icon(
               Icons.done_all,
               size: 16,
-              color: item.lastMessage.startsWith('✓✓') ? Colors.blueAccent : Colors.grey[500], // Esempio per spunte
+              // MODIFICA: Colore spunte
+              color: item.lastMessage.startsWith('✓✓') ? Colors.blueAccent : theme.hintColor,
             ),
           if (item.lastMessage.startsWith('✓')) const SizedBox(width: 4),
           Expanded(
@@ -293,7 +281,8 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
               (item.isGroup && item.lastMessageSender != null && !item.lastMessage.startsWith('✓')) ? '${item.lastMessageSender}: ${item.lastMessage.replaceFirst('✓', '').trim()}' : item.lastMessage.replaceFirst('✓', '').trim(),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: Colors.grey[400]),
+              // MODIFICA: Colore del testo secondario dal tema
+              style: TextStyle(color: theme.hintColor),
             ),
           ),
         ],
@@ -305,7 +294,8 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
           Text(
             item.time,
             style: TextStyle(
-              color: item.unreadCount > 0 ? const Color(0xFF00A884) : Colors.grey[500],
+              // MODIFICA: Usa il colore primario del tema per i messaggi non letti
+              color: item.unreadCount > 0 ? colorScheme.primary : theme.hintColor,
               fontSize: 12,
               fontWeight: item.unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
             ),
@@ -314,20 +304,21 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (item.isPinned) Icon(Icons.push_pin, color: Colors.grey[500], size: 16),
+              if (item.isPinned) Icon(Icons.push_pin, color: theme.hintColor, size: 16),
               if (item.isPinned && (item.isMuted || item.unreadCount > 0)) const SizedBox(width: 6),
-              if (item.isMuted) Icon(Icons.notifications_off_outlined, color: Colors.grey[500], size: 16),
+              if (item.isMuted) Icon(Icons.notifications_off_outlined, color: theme.hintColor, size: 16),
               if (item.isMuted && item.unreadCount > 0) const SizedBox(width: 6),
               if (item.unreadCount > 0)
                 Container(
                   padding: const EdgeInsets.all(5),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF00A884), // Verde WhatsApp per il badge
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary, // MODIFICA: Badge usa il colore primario
                     shape: BoxShape.circle,
                   ),
                   child: Text(
                     item.unreadCount > 99 ? '99+' : item.unreadCount.toString(),
-                    style: const TextStyle(color: Colors.black87, fontSize: 10, fontWeight: FontWeight.bold),
+                    // MODIFICA: Il colore del testo sul badge si adatta per il contrasto
+                    style: TextStyle(color: colorScheme.onPrimary, fontSize: 10, fontWeight: FontWeight.bold),
                   ),
                 ),
             ],
@@ -335,27 +326,8 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
         ],
       ),
       onTap: () {
-        // Azione quando si clicca su una chat
         logInfo('Tapped on ${item.name}');
       },
     );
   }
 }
-
-// DA INSERIRE NEL TUO MAIN O DOVE DEFINISCI LE ROUTE CON GoRouter
-// Esempio di come potrebbe essere usato con GoRouter nel file principale:
-/*
-GoRoute(
-  path: '/una_chat', // Il path che hai definito
-  name: 'una_chat_main_screen', // Opzionale, ma utile
-  builder: (context, state) {
-    // HomeScreen è un ipotetico wrapper, se non lo hai, usa direttamente UnaChatMainScreen
-    // return const HomeScreen( // Se HomeScreen è uno Scaffold con AppBar generica
-    //   screenName: 'Una Chat', // Passato a HomeScreen
-    //   child: UnaChatMainScreen(),
-    // );
-    // Oppure, se UnaChatMainScreen è autonoma e gestisce il suo Scaffold e AppBar:
-    return const UnaChatMainScreen();
-  },
-),
-*/

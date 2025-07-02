@@ -159,7 +159,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDrawer(BuildContext context, double drawerWidth, double starGraphicSize, double starRadius) {
-    final chatExpansionController = ExpansionTileController();
     return Drawer(
       width: drawerWidth,
       child: SafeArea(
@@ -195,11 +194,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
                         if (authController.isSuperAdmin.value == true) ...getSistema(context, authController), // <-- Qui usi la funzione
 
-                        ExpansionTile(
-                          controller: chatExpansionController,
+                        ListTile(
                           leading: const Icon(Icons.chat),
-                          title: const Text("Chat"),
-                          children: [ListTile(title: const Text("..."))],
+                          title: const Text('Chat'),
+                          onTap: () => GoRouter.of(context).go('/app/chat'),
                         ),
                       ],
                     )),
@@ -241,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(width: 8),
                   const Text('Una Social', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(width: 12),
-                  Expanded(child: Text(widget.screenName, style: const TextStyle(fontSize: 16), overflow: TextOverflow.ellipsis)),
+                  Expanded(child: Text(widget.screenName, style: const TextStyle(fontSize: 20, color: Colors.red, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                   if (canShowDbGridControls) ...[
                     IconButton(tooltip: "Ricarica Dati", icon: const Icon(Icons.refresh), onPressed: currentDbGridControl.refreshData),
                     if (canToggleView) IconButton(tooltip: "Cambia vista", icon: const Icon(Icons.view_quilt_outlined), onPressed: _handleToggleView),
