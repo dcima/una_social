@@ -1,6 +1,7 @@
 // una_chat_main_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:una_chat/screens/new_chat.dart';
 import 'package:una_social/helpers/logger_helper.dart';
 import 'package:una_social/helpers/snackbar_helper.dart'; // Importa il logger
 
@@ -97,6 +98,12 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
 
   String _selectedFilter = "Tutti";
 
+  Widget cercaInChat(String value, BuildContext context) {
+    appLogger.info('Cerca in chat: $value');
+    SnackbarHelper.showInfoSnackbar(context, "Funzione di ricerca non implementata");
+    return const SizedBox.shrink();
+  }
+
   @override
   Widget build(BuildContext context) {
     // MODIFICA: Otteniamo il tema corrente per accedere ai suoi colori e stili
@@ -116,21 +123,65 @@ class _UnaChatMainScreenState extends State<UnaChatMainScreen> {
       // backgroundColor: Colors.black87, <-- Rimosso
       body: Column(
         children: [
-          // Barra di ricerca
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-            child: TextField(
-              // MODIFICA: La decorazione ora è definita nel tema globale (main.dart)
-              // ma possiamo ancora personalizzare se necessario.
-              decoration: InputDecoration(
-                hintText: 'Cerca',
-                hintStyle: TextStyle(color: theme.hintColor),
-                prefixIcon: Icon(Icons.search, color: theme.hintColor),
-                fillColor: colorScheme.surfaceVariant, // Usa un colore di sfondo dal tema
-                contentPadding: const EdgeInsets.symmetric(vertical: 0.0),
+          Row(
+            children: [
+              // Barra di ricerca
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                  child: TextField(
+                    // MODIFICA: La decorazione ora è definita nel tema globale (main.dart)
+                    // ma possiamo ancora personalizzare se necessario.
+                    onChanged: (String value) {
+                      // Controlla se la lunghezza del testo è di almeno 3 caratteri
+                      if (value.length >= 3) {
+                        cercaInChat(value, context); // MODIFICA: Usa il logger per registrare l'input di ricerca
+                        // log() da 'dart:developer' è preferibile a print() per un output più pulito.
+                      }
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'Cerca',
+                      hintStyle: TextStyle(color: theme.hintColor),
+                      prefixIcon: Icon(Icons.search, color: theme.hintColor),
+                      fillColor: colorScheme.surfaceContainerHighest, // Usa un colore di sfondo dal tema
+                      contentPadding: const EdgeInsets.symmetric(vertical: 0.0),
+                    ),
+                    style: TextStyle(color: colorScheme.onSurface), // Colore testo dal tema
+                  ),
+                ),
               ),
-              style: TextStyle(color: colorScheme.onSurface), // Colore testo dal tema
-            ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                child: IconButton(
+                  icon: Icon(Icons.edit, color: theme.hintColor),
+                  onPressed: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true, // Permette al sheet di occupare tutto lo schermo
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(16.0)),
+                      ),
+                      builder: (context) {
+                        // Occupa il 95% dell'altezza dello schermo per un look più nativo
+                        return SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.95,
+                          child: const NewChatScreen(),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                child: IconButton(
+                  icon: Icon(Icons.filter_alt, color: theme.hintColor),
+                  onPressed: () {
+                    SnackbarHelper.showInfoSnackbar(context, "Impostazioni filter non implementate");
+                  },
+                ),
+              ),
+            ],
           ),
           // Filtri
           Padding(

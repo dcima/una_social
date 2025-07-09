@@ -12,35 +12,9 @@ dependencies:
     sdk: flutter # Essenziale per quasi tutti i pacchetti UI Flutter
   una_social:
     path: ../../  # Questo percorso va da 'packages/una_chat/' alla root
-    
-  # DIPENDENZE SPECIFICHE DEL MODULO CHAT:
-  # Esempi di pacchetti che POTREBBERO servire a una_chat:
-  # (Questi sono solo esempi, aggiungi solo ciò che usi realmente in una_chat)
+      
+  country_picker: ^2.0.27
 
-  # Per la gestione dello stato (se usi una soluzione specifica per questo modulo)
-  # provider: ^6.0.5
-  # riverpod: ^2.3.6
-
-  # Per chiamate di rete (se la chat si appoggia a un backend)
-  # http: ^0.13.6
-  # dio: ^5.1.1
-
-  # Per Firebase (se usi Firestore/Realtime Database per la chat)
-  # cloud_firestore: ^4.8.0
-  # firebase_auth: ^4.6.2 # Se la chat gestisce l'autenticazione o ha bisogno di info utente
-
-  # Per formattare date/ore dei messaggi
-  # intl: ^0.18.0
-
-  # Per salvare dati localmente (es. bozze di messaggi, impostazioni chat)
-  # shared_preferences: ^2.1.0
-
-  # Per gestire immagini (es. avatar, immagini inviate)
-  # image_picker: ^0.8.7+4
-  # cached_network_image: ^3.2.3
-
-  # Altri pacchetti UI specifici che potresti usare solo nella chat
-  # emoji_picker_flutter: ^1.5.2
 
 dev_dependencies:
   flutter_test:
@@ -49,7 +23,6 @@ dev_dependencies:
 
 # Sezione specifica di Flutter (se il pacchetto ha asset, font, plugin nativi, ecc.)
 flutter:
-  # Se una_chat usa Material Design (probabile)
   uses-material-design: true
 
   # Se una_chat ha i suoi asset (immagini, suoni di notifica specifici per la chat, ecc.)
