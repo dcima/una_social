@@ -206,17 +206,21 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
   Future<void> _updateAvatarDisplay() async {
     if (!mounted) return;
     setState(() => _isLoadingDisplayImageUrl = true);
+
     final textInField = _photoUrlController.text.trim();
     String? finalUrl;
+
     if (textInField.isNotEmpty && textInField.startsWith('http')) {
       finalUrl = textInField;
     } else {
-      // --- MODIFICA 2: Usa la funzione universale per coerenza ---
+      // **THE FIX:** Add 'await' here because the helper function is now async.
+      final authUser = _supabase.auth.currentUser;
       finalUrl = await AvatarHelper.getDisplayAvatarUrl(
-        user: null,
-        email: widget.initialPersonale.emailPrincipale, // L'email del modello Personale
+        user: widget.initialPersonale,
+        authUser: authUser,
       );
     }
+
     if (mounted) {
       setState(() {
         _currentDisplayImageUrl = finalUrl;

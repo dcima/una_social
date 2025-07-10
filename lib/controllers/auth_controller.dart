@@ -9,63 +9,62 @@ class AuthController extends GetxController {
   final SupabaseClient _supabase = Supabase.instance.client;
 
   // --- STATI OSSERVABILI ---
-  // Permission States
   final RxList<String> userGroups = <String>[].obs;
-  final Rxn<bool> isSuperAdmin = Rxn<bool>(); // null = sconosciuto/in caricamento
+  final Rxn<bool> isSuperAdmin = Rxn<bool>();
   final RxBool isLoadingPermissions = false.obs;
-
-  // Realtime Presence States
   final RxInt connectedUsers = 0.obs;
+
+  // --- PROPRIETÀ PRIVATE ---
   RealtimeChannel? _onlineUsersChannel;
   final Set<String> _activeUserIds = {};
-
-  // A Completer to manage the first permission load and prevent race conditions.
   Completer<void>? _permissionsCompleter;
 
   @override
   void onInit() {
     super.onInit();
-    // Listen to authentication state changes to reload permissions and manage presence.
+    // The onAuthStateChange stream is the single source of truth.
+    // It fires initialSession automatically on startup, so no extra checks are needed.
     _supabase.auth.onAuthStateChange.listen((data) {
-      final AuthChangeEvent event = data.event;
-      logInfo('[AuthController] Auth Event: $event');
-      _handleAuthStateChange(event);
+      logInfo('[AuthController] Auth Event: ${data.event}, Has Session: ${data.session != null}');
+      _handleAuthStateChange(data);
     });
-
-    // On startup, if a user is already logged in, load their data.
-    if (_supabase.auth.currentUser != null) {
-      _handleAuthStateChange(AuthChangeEvent.initialSession);
-    }
   }
 
   @override
   void onClose() {
-    _unsubscribeFromOnlineUsers(); // Clean up the channel on close
+    _unsubscribeFromOnlineUsers();
     super.onClose();
   }
 
-  /// Central handler for all authentication events.
-  Future<void> _handleAuthStateChange(AuthChangeEvent event) async {
-    if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.tokenRefreshed || event == AuthChangeEvent.userUpdated || event == AuthChangeEvent.initialSession) {
-      logInfo('[AuthController] User authenticated or session updated. Loading permissions and subscribing to presence...');
-      loadPermissions();
-      _subscribeToOnlineUsers();
-    } else if (event == AuthChangeEvent.signedOut) {
-      logInfo('[AuthController] User signed out.');
+  /// Central handler for all authentication events, based on the presence of a session.
+  void _handleAuthStateChange(AuthState data) {
+    final session = data.session;
+    final event = data.event;
+
+    // A session exists (user is signed in, session restored, or token refreshed)
+    if (session != null) {
+      // We only need to react when the user state actually changes.
+      if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession || event == AuthChangeEvent.tokenRefreshed) {
+        logInfo('[AuthController] Session available. Loading permissions and subscribing to presence.');
+        loadPermissions();
+        _subscribeToOnlineUsers();
+      }
+      // No session exists (user signed out, or initial check found no session)
+    } else if (event == AuthChangeEvent.signedOut || event == AuthChangeEvent.initialSession) {
+      logInfo('[AuthController] No session. Clearing permissions and unsubscribing.');
       clearUserPermissions();
       _unsubscribeFromOnlineUsers();
     }
   }
 
   /// Main method to load all user permissions (Super Admin + Groups).
-  /// Manages concurrency to avoid multiple calls.
   Future<void> loadPermissions() async {
     if (isLoadingPermissions.value) {
       logInfo('[AuthController] Permission load already in progress, awaiting...');
       return _permissionsCompleter?.future;
     }
-
     if (_supabase.auth.currentUser == null) {
+      logError('[AuthController] loadPermissions called with no user.');
       clearUserPermissions();
       return;
     }
@@ -80,13 +79,10 @@ class AuthController extends GetxController {
         _fetchUserGroups(),
       ]);
 
-      final bool adminStatus = results[0] as bool;
-      final List<String> groups = results[1] as List<String>;
+      isSuperAdmin.value = results[0] as bool;
+      userGroups.assignAll(results[1] as List<String>);
 
-      isSuperAdmin.value = adminStatus;
-      userGroups.assignAll(groups);
-
-      logInfo('[AuthController] Permissions loaded. IsSuperAdmin: $adminStatus, Groups: $groups');
+      logInfo('[AuthController] Permissions loaded. IsSuperAdmin: ${isSuperAdmin.value}, Groups: ${userGroups.join(', ')}');
     } catch (e) {
       logError('[AuthController] Error loading permissions: $e');
       isSuperAdmin.value = false;
@@ -98,6 +94,20 @@ class AuthController extends GetxController {
       }
     }
   }
+
+  /// Clears all user permissions, usually called on logout.
+  void clearUserPermissions() {
+    userGroups.clear();
+    isSuperAdmin.value = null;
+    isLoadingPermissions.value = false;
+    if (!(_permissionsCompleter?.isCompleted ?? true)) {
+      _permissionsCompleter?.completeError("Permissions cleared during load.");
+    }
+    _permissionsCompleter = null;
+    logInfo('[AuthController] User permissions cleared.');
+  }
+
+  // ... (the rest of the file remains the same as the previously corrected version) ...
 
   /// Internal function to call the RPC for Super Admin status.
   Future<bool> _fetchSuperAdminStatus() async {
@@ -119,15 +129,6 @@ class AuthController extends GetxController {
       logWarning("[AuthController] Error in _fetchUserGroups (this may be normal if you don't use groups): $e");
       return [];
     }
-  }
-
-  /// Clears all user permissions, usually called on logout.
-  void clearUserPermissions() {
-    userGroups.clear();
-    isSuperAdmin.value = null;
-    isLoadingPermissions.value = false;
-    _permissionsCompleter = null;
-    logInfo('[AuthController] User permissions cleared.');
   }
 
   /// Asynchronous and robust function for the router to check admin status.
@@ -214,13 +215,10 @@ class AuthController extends GetxController {
     if (_onlineUsersChannel == null) return;
     logInfo("PRESENCE: Reconciling user state...");
 
-    // The presenceState() method returns a List<SinglePresenceState>.
     final List<SinglePresenceState> presenceStateList = _onlineUsersChannel!.presenceState();
     final Set<String> remoteUserIds = {};
 
-    // Iterate over each SinglePresenceState in the list.
     for (final singleState in presenceStateList) {
-      // Each state contains a list of presences for a client. Iterate over them.
       for (final presence in singleState.presences) {
         final userId = presence.payload['user_id'] as String?;
         if (userId != null && userId.isNotEmpty) {

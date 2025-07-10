@@ -8,7 +8,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/controllers/esterni_controller.dart';
 import 'package:una_social/helpers/avatar_helper.dart';
 import 'package:una_social/models/esterni.dart';
-import 'package:una_social/models/i_user_profile.dart';
 
 // --- CLASSE HELPER PER GESTIRE I CAMPI DI CONTATTO ---
 // Esattamente come quella usata nel profilo Personale
@@ -129,16 +128,21 @@ class _EsterniProfileState extends State<EsterniProfile> {
   Future<void> _updateAvatarDisplay() async {
     if (!mounted) return;
     setState(() => _isLoadingDisplayImageUrl = true);
+
     final textInField = _photoUrlController.text.trim();
     String? finalUrl;
+
     if (textInField.isNotEmpty && textInField.startsWith('http')) {
       finalUrl = textInField;
     } else {
+      // **THE FIX:** Add 'await' here because the helper function is now async.
+      final authUser = _supabase.auth.currentUser;
       finalUrl = await AvatarHelper.getDisplayAvatarUrl(
-        user: widget.initialEsterni as IUserProfile?,
-        email: widget.initialEsterni.emailPrincipale,
+        user: widget.initialEsterni,
+        authUser: authUser,
       );
     }
+
     if (mounted) {
       setState(() {
         _currentDisplayImageUrl = finalUrl;

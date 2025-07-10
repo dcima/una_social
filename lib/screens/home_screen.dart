@@ -10,9 +10,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/controllers/auth_controller.dart';
 import 'package:una_social/controllers/esterni_controller.dart';
 import 'package:una_social/controllers/personale_controller.dart';
+import 'package:una_social/helpers/auth_helper.dart';
 import 'package:una_social/helpers/avatar_helper.dart';
 import 'package:una_social/helpers/db_grid.dart';
 import 'package:una_social/models/esterni.dart';
+import 'package:una_social/models/i_user_profile.dart';
 import 'package:una_social/models/personale.dart';
 import 'package:una_social/painters/star_painter.dart';
 import 'package:una_social/screens/esterni_profile.dart';
@@ -43,7 +45,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final AuthController authController = Get.find<AuthController>();
   String _appVersion = 'Caricamento...';
   String _buildNumber = '';
-  // Flag per eseguire il controllo del profilo una sola volta
   bool _profileCheckCompleted = false;
 
   @override
@@ -68,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: isError ? Colors.redAccent : Colors.green,
-        duration: const Duration(seconds: 4), // Durata leggermente aumentata
+        duration: const Duration(seconds: 4),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -119,7 +120,6 @@ class _HomeScreenState extends State<HomeScreen> {
       title = 'Modifica Profilo Personale';
       contentWidget = PersonaleProfile(initialPersonale: profile);
     } else if (profile is Esterni) {
-      // Modificato per distinguere creazione da modifica
       title = profile.id.isEmpty ? 'Completa il tuo Profilo' : 'Modifica Profilo Esterno';
       contentWidget = EsterniProfile(initialEsterni: profile);
     } else {
@@ -141,26 +141,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- NUOVO METODO PER RICHIEDERE IL COMPLETAMENTO DEL PROFILO ---
   void _promptToCompleteProfile(User authUser) {
-    // Esegui dopo che il frame è stato disegnato per evitare errori di rendering
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-
-      // 1. Mostra la SnackBar
       _showSnackbar("Per favore, completa il tuo profilo.");
-
-      // 2. Crea un profilo "vuoto" con i dati dall'autenticazione
-      // Nota: EsterniProfile dovrà essere in grado di gestire un 'INSERT'
-      // se l'ID è vuoto, invece di un 'UPDATE'.
       final newEsternoProfile = Esterni(
-        id: '', // L'ID verrà generato dal DB
+        id: '',
         authUuid: authUser.id,
         emailPrincipale: authUser.email,
-        // Altri campi sono null di default
       );
-
-      // 3. Apri il dialogo per la modifica/creazione
       _showProfileDialog(newEsternoProfile);
     });
   }
@@ -284,17 +273,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     final Personale? personale = ctrlPersonale.personale.value;
                     final Esterni? esterno = ctrlEsterni.esterni.value;
-                    final dynamic activeProfile = personale ?? esterno;
+                    final IUserProfile? activeProfile = personale ?? esterno;
                     final bool isLoading = ctrlPersonale.isLoading.value || ctrlEsterni.isLoading.value;
 
-                    // --- LOGICA DI CONTROLLO PROFILO ---
                     final bool isExternalUser = personale == null;
                     final bool profileIsMissing = esterno == null;
-                    // Controlla solo quando il caricamento è finito e non l'abbiamo già fatto
                     if (!_profileCheckCompleted && isExternalUser && !isLoading && profileIsMissing) {
-                      // Imposta il flag per non eseguire più questo blocco
                       _profileCheckCompleted = true;
-                      // Avvia la procedura per richiedere il completamento del profilo
                       _promptToCompleteProfile(authUser);
                     }
 
@@ -302,15 +287,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       return const Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
                     }
 
+                    // Re-introduce FutureBuilder since getDisplayAvatarUrl is now async
                     return FutureBuilder<String?>(
-                      key: ValueKey('avatar_${authUser.id}_${activeProfile?.photoUrl}'),
-                      // --- MODIFICA FINALE: USA LA FUNZIONE UNIVERSALE ---
+                      // Use a unique key to force the future to re-run when the profile changes
+                      key: ValueKey('avatar_${activeProfile?.photoUrl}_${authUser.id}'),
                       future: AvatarHelper.getDisplayAvatarUrl(
-                        user: activeProfile, // Ora accetta sia Personale che Esterni
-                        email: authUser.email,
+                        user: activeProfile,
+                        authUser: authUser,
                       ),
                       builder: (context, snapshot) {
-                        final avatarWidget = (snapshot.connectionState == ConnectionState.waiting) ? const CircleAvatar(radius: 18, child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))) : _buildAvatar(snapshot.data);
+                        Widget avatarContent;
+
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          // Show a loader while waiting for the signed URL
+                          avatarContent = const CircleAvatar(radius: 18, child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
+                        } else {
+                          // Build the avatar with the result (which could be null)
+                          avatarContent = _buildAvatar(snapshot.data);
+                        }
+
                         return PopupMenuButton<ProfileAction>(
                           tooltip: "Opzioni Profilo",
                           itemBuilder: (popupContext) => [
@@ -326,7 +321,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 _showProfileDialog(profileToEdit);
                                 break;
                               case ProfileAction.logout:
-                                // ... (logica logout invariata)
+                                AuthHelper.setLogoutReason(LogoutReason.userInitiated);
+                                Supabase.instance.client.auth.signOut();
                                 break;
                               case ProfileAction.version:
                                 _showVersionDialog();
@@ -335,7 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           offset: const Offset(0, kToolbarHeight * 0.8),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: avatarWidget),
+                          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: avatarContent),
                         );
                       },
                     );
