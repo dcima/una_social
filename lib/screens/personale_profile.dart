@@ -211,9 +211,10 @@ class _PersonaleProfileState extends State<PersonaleProfile> {
     if (textInField.isNotEmpty && textInField.startsWith('http')) {
       finalUrl = textInField;
     } else {
+      // --- MODIFICA 2: Usa la funzione universale per coerenza ---
       finalUrl = await AvatarHelper.getDisplayAvatarUrl(
-        user: widget.initialPersonale,
-        email: widget.initialPersonale.emailPrincipale,
+        user: null,
+        email: widget.initialPersonale.emailPrincipale, // L'email del modello Personale
       );
     }
     if (mounted) {

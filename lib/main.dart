@@ -9,6 +9,8 @@ import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/app_router.dart';
 import 'package:una_social/controllers/auth_controller.dart';
+import 'package:una_social/controllers/esterni_controller.dart';
+import 'package:una_social/controllers/personale_controller.dart';
 import 'package:una_social/helpers/logger_helper.dart';
 
 const String supabaseUrlEnvKey = 'SUPABASE_URL';
@@ -79,6 +81,9 @@ Future<void> main() async {
 
     // 4. Inizializza i controller di GetX dopo che Supabase è pronto
     Get.put(AuthController(), permanent: true);
+    Get.put(PersonaleController(), permanent: true);
+    Get.put(EsterniController(), permanent: true);
+
     logInfo("[Main] AuthController inizializzato con GetX.");
   } catch (e, stackTrace) {
     logError("ERRORE CRITICO durante l'inizializzazione di Supabase:", e, stackTrace);
@@ -116,10 +121,6 @@ class MyApp extends StatelessWidget {
       ),
       themeMode: ThemeMode.system,
       debugShowCheckedModeBanner: false,
-
-      // --- LA CORREZIONE È QUI ---
-      // GetMaterialApp.router non usa 'routerConfig'.
-      // Dobbiamo usare i parametri delegate-based che mi aveva mostrato prima.
       routerDelegate: AppRouter.router.routerDelegate,
       routeInformationParser: AppRouter.router.routeInformationParser,
       routeInformationProvider: AppRouter.router.routeInformationProvider,

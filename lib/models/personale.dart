@@ -3,16 +3,22 @@
 // ignore_for_file: avoid_print // Utile per debug, considera un logger per produzione
 
 import 'dart:convert';
+import 'package:una_social/models/i_user_profile.dart';
 
-class Personale {
+class Personale implements IUserProfile {
   final String uuid;
   String ente;
   final int id; // Questo 'id' è specifico dell'ente, non l'UUID primario
   final String cognome;
   final String nome;
   int struttura; // Questo 'struttura' è l'ID della struttura all'interno dell'ente
-  final String emailPrincipale;
-  String? photoUrl;
+
+  @override // L'override è già implicato
+  final String? emailPrincipale;
+
+  @override // L'override è già implicito, ma è buona pratica
+  final String? photoUrl;
+
   final String? cv;
   // Per campi JSONB: altreEmails e telefoni sono liste di mappe con chiavi 't' (tipo) e 'v' (valore)
   final List<Map<String, String>>? altreEmails;

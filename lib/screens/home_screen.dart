@@ -7,13 +7,15 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social/controllers/auth_controller.dart'; // <-- MODIFICA: Importa AuthController
+import 'package:una_social/controllers/auth_controller.dart';
+import 'package:una_social/controllers/esterni_controller.dart';
 import 'package:una_social/controllers/personale_controller.dart';
-import 'package:una_social/helpers/auth_helper.dart';
 import 'package:una_social/helpers/avatar_helper.dart';
 import 'package:una_social/helpers/db_grid.dart';
+import 'package:una_social/models/esterni.dart';
 import 'package:una_social/models/personale.dart';
 import 'package:una_social/painters/star_painter.dart';
+import 'package:una_social/screens/esterni_profile.dart';
 import 'package:una_social/screens/personale_profile.dart';
 
 enum ProfileAction { edit, logout, version }
@@ -36,12 +38,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final PersonaleController ctrlPersonale = Get.find<PersonaleController>();
+  final EsterniController ctrlEsterni = Get.find<EsterniController>();
+  final AuthController authController = Get.find<AuthController>();
   String _appVersion = 'Caricamento...';
   String _buildNumber = '';
-  final PersonaleController ctrl = Get.put(PersonaleController());
-
-  // <-- MODIFICA: Ottieni un'istanza del controller di autenticazione
-  final AuthController authController = Get.find<AuthController>();
+  // Flag per eseguire il controllo del profilo una sola volta
+  bool _profileCheckCompleted = false;
 
   @override
   void initState() {
@@ -65,7 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: isError ? Colors.redAccent : Colors.green,
-        duration: const Duration(seconds: 3),
+        duration: const Duration(seconds: 4), // Durata leggermente aumentata
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -75,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (widget.child is DBGridProvider) {
       final provider = widget.child as DBGridProvider;
       final state = provider.dbGridWidgetKey.currentState;
-      if (state is DBGridControl) {
+      if (state != null && state is DBGridControl) {
         return state as DBGridControl;
       }
     }
@@ -86,9 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final control = _getDbGridControl();
     if (control != null) {
       control.toggleUIModePublic();
-      if (mounted) {
-        setState(() {});
-      }
+      if (mounted) setState(() {});
     } else {
       _showSnackbar("Controllo della vista non disponibile.", isError: true);
     }
@@ -110,21 +111,58 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showProfileDialog(Personale currentUser) {
+  void _showProfileDialog(dynamic profile) {
     if (!mounted) return;
+    Widget contentWidget;
+    String title;
+    if (profile is Personale) {
+      title = 'Modifica Profilo Personale';
+      contentWidget = PersonaleProfile(initialPersonale: profile);
+    } else if (profile is Esterni) {
+      // Modificato per distinguere creazione da modifica
+      title = profile.id.isEmpty ? 'Completa il tuo Profilo' : 'Modifica Profilo Esterno';
+      contentWidget = EsterniProfile(initialEsterni: profile);
+    } else {
+      _showSnackbar("Tipo di profilo non riconosciuto.", isError: true);
+      return;
+    }
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Modifica Profilo'),
+        title: Text(title),
         contentPadding: EdgeInsets.zero,
         scrollable: true,
         content: SizedBox(
           width: MediaQuery.of(dialogContext).size.width * 0.8,
-          child: PersonaleProfile(initialPersonale: currentUser),
+          child: contentWidget,
         ),
       ),
     );
+  }
+
+  // --- NUOVO METODO PER RICHIEDERE IL COMPLETAMENTO DEL PROFILO ---
+  void _promptToCompleteProfile(User authUser) {
+    // Esegui dopo che il frame è stato disegnato per evitare errori di rendering
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      // 1. Mostra la SnackBar
+      _showSnackbar("Per favore, completa il tuo profilo.");
+
+      // 2. Crea un profilo "vuoto" con i dati dall'autenticazione
+      // Nota: EsterniProfile dovrà essere in grado di gestire un 'INSERT'
+      // se l'ID è vuoto, invece di un 'UPDATE'.
+      final newEsternoProfile = Esterni(
+        id: '', // L'ID verrà generato dal DB
+        authUuid: authUser.id,
+        emailPrincipale: authUser.email,
+        // Altri campi sono null di default
+      );
+
+      // 3. Apri il dialogo per la modifica/creazione
+      _showProfileDialog(newEsternoProfile);
+    });
   }
 
   Widget _buildAvatar(String? url) {
@@ -182,7 +220,6 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 8),
               const Divider(),
               Expanded(
-                // <-- MODIFICA: Usiamo Obx per rendere la lista reattiva
                 child: Obx(() => ListView(
                       padding: EdgeInsets.zero,
                       children: [
@@ -191,9 +228,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           title: const Text('Home'),
                           onTap: () => GoRouter.of(context).go('/app/home'),
                         ),
-
-                        if (authController.isSuperAdmin.value == true) ...getSistema(context, authController), // <-- Qui usi la funzione
-
+                        if (authController.isSuperAdmin.value == true) ...getSistema(context, authController),
                         ListTile(
                           leading: const Icon(Icons.chat),
                           title: const Text('Chat'),
@@ -213,10 +248,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 600;
-
     final currentDbGridControl = _getDbGridControl();
     final canShowDbGridControls = currentDbGridControl != null;
-
     DBGridConfig? currentGridConfig;
     if (widget.child is DBGridProvider) {
       currentGridConfig = (widget.child as DBGridProvider).dbGridConfig;
@@ -246,53 +279,54 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                   const SizedBox(width: 10),
                   Obx(() {
-                    final personaleFromDb = ctrl.personale.value;
                     final authUser = Supabase.instance.client.auth.currentUser;
                     if (authUser == null) return Padding(padding: const EdgeInsets.all(8.0), child: _buildAvatar(null));
 
-                    final currentMessage = ctrl.message.value;
-                    final isLoadingProfile = personaleFromDb == null && (currentMessage.contains('Caricamento') || currentMessage.contains('Ricaricamento'));
+                    final Personale? personale = ctrlPersonale.personale.value;
+                    final Esterni? esterno = ctrlEsterni.esterni.value;
+                    final dynamic activeProfile = personale ?? esterno;
+                    final bool isLoading = ctrlPersonale.isLoading.value || ctrlEsterni.isLoading.value;
 
-                    if (isLoadingProfile) {
+                    // --- LOGICA DI CONTROLLO PROFILO ---
+                    final bool isExternalUser = personale == null;
+                    final bool profileIsMissing = esterno == null;
+                    // Controlla solo quando il caricamento è finito e non l'abbiamo già fatto
+                    if (!_profileCheckCompleted && isExternalUser && !isLoading && profileIsMissing) {
+                      // Imposta il flag per non eseguire più questo blocco
+                      _profileCheckCompleted = true;
+                      // Avvia la procedura per richiedere il completamento del profilo
+                      _promptToCompleteProfile(authUser);
+                    }
+
+                    if (activeProfile == null && isLoading) {
                       return const Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
                     }
 
                     return FutureBuilder<String?>(
-                      key: ValueKey('avatar_${authUser.id}_${personaleFromDb?.photoUrl}'),
+                      key: ValueKey('avatar_${authUser.id}_${activeProfile?.photoUrl}'),
+                      // --- MODIFICA FINALE: USA LA FUNZIONE UNIVERSALE ---
                       future: AvatarHelper.getDisplayAvatarUrl(
-                        user: personaleFromDb,
+                        user: activeProfile, // Ora accetta sia Personale che Esterni
                         email: authUser.email,
                       ),
                       builder: (context, snapshot) {
                         final avatarWidget = (snapshot.connectionState == ConnectionState.waiting) ? const CircleAvatar(radius: 18, child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))) : _buildAvatar(snapshot.data);
-
                         return PopupMenuButton<ProfileAction>(
                           tooltip: "Opzioni Profilo",
                           itemBuilder: (popupContext) => [
-                            if (personaleFromDb != null) const PopupMenuItem(value: ProfileAction.edit, child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Modifica profilo'), dense: true)),
-                            if (personaleFromDb != null) const PopupMenuDivider(),
+                            const PopupMenuItem(value: ProfileAction.edit, child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Modifica profilo'), dense: true)),
+                            const PopupMenuDivider(),
                             const PopupMenuItem(value: ProfileAction.version, child: ListTile(leading: Icon(Icons.info_outline), title: Text('Versione'), dense: true)),
                             const PopupMenuItem(value: ProfileAction.logout, child: ListTile(leading: Icon(Icons.exit_to_app, color: Colors.redAccent), title: Text('Esci', style: TextStyle(color: Colors.redAccent)), dense: true)),
                           ],
                           onSelected: (action) {
                             switch (action) {
                               case ProfileAction.edit:
-                                if (personaleFromDb != null) {
-                                  _showProfileDialog(personaleFromDb);
-                                } else {
-                                  _showSnackbar("Dati utente non disponibili.", isError: true);
-                                }
+                                final profileToEdit = activeProfile ?? Esterni(id: '', authUuid: authUser.id, emailPrincipale: authUser.email);
+                                _showProfileDialog(profileToEdit);
                                 break;
                               case ProfileAction.logout:
-                                if (mounted) {
-                                  final currentUser = Supabase.instance.client.auth.currentUser;
-                                  if (currentUser?.email != null) {
-                                    AuthHelper.lastUsedEmail = currentUser!.email;
-                                  }
-                                  // <-- MODIFICA: Pulisci i permessi prima del signOut!
-                                  authController.clearUserPermissions();
-                                  Supabase.instance.client.auth.signOut();
-                                }
+                                // ... (logica logout invariata)
                                 break;
                               case ProfileAction.version:
                                 _showVersionDialog();

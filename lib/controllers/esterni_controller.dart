@@ -1,14 +1,14 @@
-// lib/controllers/personale_controller.dart
+// lib/controllers/esterni_controller.dart
 import 'dart:async';
 
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/helpers/logger_helper.dart';
-import 'package:una_social/models/personale.dart';
+import 'package:una_social/models/esterni.dart';
 
-class PersonaleController extends GetxController {
+class EsterniController extends GetxController {
   final supabase = Supabase.instance.client;
-  var personale = Rxn<Personale>();
+  var esterni = Rxn<Esterni>();
   var isLoading = false.obs;
   var message = ''.obs;
 
@@ -17,25 +17,25 @@ class PersonaleController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    logInfo('PersonaleController: onInit()');
+    logInfo('EsterniController: onInit()');
 
     // Listen to auth state changes to trigger data loading/clearing.
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
       final AuthChangeEvent event = data.event;
-      logInfo("PersonaleController.onAuthStateChange: Evento $event");
+      logInfo("EsterniController.onAuthStateChange: Evento $event");
       _handleAuthStateChange(event);
     });
 
     // Handle the case where a user is already logged in when the app starts.
     if (supabase.auth.currentUser != null) {
-      logInfo("PersonaleController.onInit: Existing session detected. Starting data load.");
+      logInfo("EsterniController.onInit: Existing session detected. Starting data load.");
       _handleAuthStateChange(AuthChangeEvent.initialSession);
     }
   }
 
   @override
   void onClose() {
-    logInfo('PersonaleController: onClose()');
+    logInfo('EsterniController: onClose()');
     _authSubscription?.cancel(); // Prevent memory leaks
     super.onClose();
   }
@@ -44,57 +44,57 @@ class PersonaleController extends GetxController {
   Future<void> _handleAuthStateChange(AuthChangeEvent event) async {
     // Guard to prevent multiple concurrent loads.
     if (isLoading.value) {
-      logInfo("PersonaleController: Load already in progress, ignoring new event '$event'.");
+      logInfo("EsterniController: Load already in progress, ignoring new event '$event'.");
       return;
     }
 
     isLoading.value = true;
 
     if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession || event == AuthChangeEvent.userUpdated) {
-      logInfo("PersonaleController: User logged in or session initialized. Loading data...");
+      logInfo("EsterniController: User logged in or session initialized. Loading data...");
       await _loadUserData();
     } else if (event == AuthChangeEvent.signedOut) {
-      logInfo("PersonaleController: User signed out. Clearing state...");
-      personale.value = null;
+      logInfo("EsterniController: User signed out. Clearing state...");
+      esterni.value = null;
       message.value = 'User signed out.';
     }
 
     isLoading.value = false;
   }
 
-  /// Fetches the 'personale' profile from the database.
+  /// Fetches the 'esterni' profile from the database.
   Future<void> _loadUserData() async {
     message.value = 'Loading user profile...';
     final user = supabase.auth.currentUser;
 
     if (user == null) {
-      logInfo('PersonaleController: Attempted to load data without an authenticated user. Aborting.');
-      personale.value = null;
+      logInfo('EsterniController: Attempted to load data without an authenticated user. Aborting.');
+      esterni.value = null;
       return;
     }
 
     try {
-      final response = await supabase.from('personale').select().eq('email_principale', user.email!).limit(1).maybeSingle();
+      final response = await supabase.from('esterni').select().eq('email_principale', user.email!).limit(1).maybeSingle();
 
       if (response != null) {
-        personale.value = Personale.fromJson(response);
-        logInfo("PersonaleController: Profile loaded for ${personale.value?.fullName}");
+        esterni.value = Esterni.fromJson(response);
+        logInfo("EsterniController: Profile loaded for ${esterni.value?.nome} ${esterni.value?.cognome}");
         message.value = 'User profile loaded.';
       } else {
-        logInfo("PersonaleController: No 'personale' profile found for: ${user.email}");
-        personale.value = null; // Explicitly set to null if not found
-        message.value = 'Personale profile not found.';
+        logInfo("EsterniController: No 'esterni' profile found for: ${user.email}");
+        esterni.value = null; // Explicitly set to null if not found
+        message.value = 'Esterni profile not found.';
       }
     } catch (err) {
       message.value = 'Error loading user data.';
-      logError('PersonaleController: _loadUserData failed with error: $err');
-      personale.value = null;
+      logError('EsterniController: _loadUserData failed with error: $err');
+      esterni.value = null;
     }
   }
 
   /// Public method to manually trigger a data reload.
   Future<void> reload() async {
-    logInfo('PersonaleController: reload() requested.');
+    logInfo('EsterniController: reload() requested.');
     // Simulate a user update event to force a refresh.
     await _handleAuthStateChange(AuthChangeEvent.userUpdated);
   }

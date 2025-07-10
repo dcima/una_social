@@ -1,5 +1,5 @@
 // lib/controllers/auth_controller.dart
-import 'dart:async'; // Importa async per Completer
+import 'dart:async';
 
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,43 +9,59 @@ class AuthController extends GetxController {
   final SupabaseClient _supabase = Supabase.instance.client;
 
   // --- STATI OSSERVABILI ---
+  // Permission States
   final RxList<String> userGroups = <String>[].obs;
   final Rxn<bool> isSuperAdmin = Rxn<bool>(); // null = sconosciuto/in caricamento
   final RxBool isLoadingPermissions = false.obs;
 
-  // Aggiungiamo un Completer per gestire la prima richiesta di caricamento
-  // e prevenire race conditions.
+  // Realtime Presence States
+  final RxInt connectedUsers = 0.obs;
+  RealtimeChannel? _onlineUsersChannel;
+  final Set<String> _activeUserIds = {};
+
+  // A Completer to manage the first permission load and prevent race conditions.
   Completer<void>? _permissionsCompleter;
 
   @override
   void onInit() {
     super.onInit();
-    // Ascolta i cambiamenti dello stato di autenticazione per ricaricare i permessi.
+    // Listen to authentication state changes to reload permissions and manage presence.
     _supabase.auth.onAuthStateChange.listen((data) {
       final AuthChangeEvent event = data.event;
       logInfo('[AuthController] Auth Event: $event');
-
-      if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.tokenRefreshed || event == AuthChangeEvent.userUpdated) {
-        logInfo('[AuthController] Utente autenticato o sessione aggiornata. Caricamento permessi...');
-        loadPermissions();
-      } else if (event == AuthChangeEvent.signedOut) {
-        logInfo('[AuthController] Utente disconnesso.');
-        clearUserPermissions();
-      }
+      _handleAuthStateChange(event);
     });
 
-    // All'avvio, se c'è già un utente, carica i suoi permessi.
+    // On startup, if a user is already logged in, load their data.
     if (_supabase.auth.currentUser != null) {
-      loadPermissions();
+      _handleAuthStateChange(AuthChangeEvent.initialSession);
     }
   }
 
-  /// Metodo principale per caricare tutti i permessi dell'utente (Super Admin + Gruppi).
-  /// Gestisce la concorrenza per evitare chiamate multiple.
+  @override
+  void onClose() {
+    _unsubscribeFromOnlineUsers(); // Clean up the channel on close
+    super.onClose();
+  }
+
+  /// Central handler for all authentication events.
+  Future<void> _handleAuthStateChange(AuthChangeEvent event) async {
+    if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.tokenRefreshed || event == AuthChangeEvent.userUpdated || event == AuthChangeEvent.initialSession) {
+      logInfo('[AuthController] User authenticated or session updated. Loading permissions and subscribing to presence...');
+      loadPermissions();
+      _subscribeToOnlineUsers();
+    } else if (event == AuthChangeEvent.signedOut) {
+      logInfo('[AuthController] User signed out.');
+      clearUserPermissions();
+      _unsubscribeFromOnlineUsers();
+    }
+  }
+
+  /// Main method to load all user permissions (Super Admin + Groups).
+  /// Manages concurrency to avoid multiple calls.
   Future<void> loadPermissions() async {
-    // Se un caricamento è già in corso, attendi il suo completamento invece di avviarne un altro.
     if (isLoadingPermissions.value) {
-      logInfo('[AuthController] Caricamento permessi già in corso, attesa...');
+      logInfo('[AuthController] Permission load already in progress, awaiting...');
       return _permissionsCompleter?.future;
     }
 
@@ -55,11 +71,10 @@ class AuthController extends GetxController {
     }
 
     isLoadingPermissions.value = true;
-    _permissionsCompleter = Completer<void>(); // Crea un nuovo completer per questa sessione di caricamento.
-    logInfo('[AuthController] Avvio caricamento permessi utente...');
+    _permissionsCompleter = Completer<void>();
+    logInfo('[AuthController] Starting user permission load...');
 
     try {
-      // Eseguiamo le chiamate per lo stato di admin e per i gruppi in parallelo per efficienza.
       final results = await Future.wait([
         _fetchSuperAdminStatus(),
         _fetchUserGroups(),
@@ -68,90 +83,167 @@ class AuthController extends GetxController {
       final bool adminStatus = results[0] as bool;
       final List<String> groups = results[1] as List<String>;
 
-      // Aggiorna gli stati osservabili con i nuovi valori.
       isSuperAdmin.value = adminStatus;
       userGroups.assignAll(groups);
 
-      logInfo('[AuthController] Permessi caricati. IsSuperAdmin: $adminStatus, Groups: $groups');
+      logInfo('[AuthController] Permissions loaded. IsSuperAdmin: $adminStatus, Groups: $groups');
     } catch (e) {
-      logError('[AuthController] Errore durante il caricamento dei permessi: $e');
-      // In caso di errore, per sicurezza, impostiamo i permessi a un livello non privilegiato.
+      logError('[AuthController] Error loading permissions: $e');
       isSuperAdmin.value = false;
       userGroups.clear();
     } finally {
       isLoadingPermissions.value = false;
-      // Segnala a chiunque fosse in attesa che il caricamento è finito,
-      // solo se il completer non è già stato completato (per sicurezza).
       if (!(_permissionsCompleter?.isCompleted ?? true)) {
         _permissionsCompleter!.complete();
       }
     }
   }
 
-  /// Funzione interna per chiamare la RPC e ottenere lo stato di Super Admin.
+  /// Internal function to call the RPC for Super Admin status.
   Future<bool> _fetchSuperAdminStatus() async {
     try {
-      logInfo("[AuthController] Chiamata RPC 'get_current_user_is_super_admin'...");
-      final dynamic response = await _supabase.rpc('get_current_user_is_super_admin');
-
-      if (response is bool) {
-        return response;
-      }
-
-      logError("[AuthController] Risposta inattesa da 'get_current_user_is_super_admin': ${response.runtimeType}");
-      return false; // Valore di default sicuro
+      final response = await _supabase.rpc('get_current_user_is_super_admin');
+      return response is bool ? response : false;
     } catch (e) {
-      logError("[AuthController] Errore in _fetchSuperAdminStatus: $e");
-      return false; // Valore di default sicuro
+      logError("[AuthController] Error in _fetchSuperAdminStatus: $e");
+      return false;
     }
   }
 
-  /// Funzione interna per chiamare la RPC e ottenere i gruppi dell'utente.
+  /// Internal function to call the RPC for user groups.
   Future<List<String>> _fetchUserGroups() async {
     try {
-      logInfo("[AuthController] Chiamata RPC 'get_my_groups'...");
-      final response = await _supabase.rpc('get_my_groups'); // Assicurati che esista
-
-      if (response is List) {
-        // Converte in sicurezza la lista dinamica in una lista di stringhe.
-        return response.map((item) => item.toString()).toList();
-      }
-
-      logWarning("[AuthController] Risposta inattesa da 'get_my_groups': ${response.runtimeType}");
-      return []; // Valore di default
+      final response = await _supabase.rpc('get_my_groups');
+      return response is List ? response.map((item) => item.toString()).toList() : [];
     } catch (e) {
-      // Se la funzione 'get_my_groups' non esiste, questo errore verrà sollevato.
-      // È sicuro ignorarlo se non prevedi di usare i gruppi.
-      logWarning("[AuthController] Errore in _fetchUserGroups (potrebbe essere normale se non usi i gruppi): $e");
-      return []; // Valore di default
+      logWarning("[AuthController] Error in _fetchUserGroups (this may be normal if you don't use groups): $e");
+      return [];
     }
   }
 
-  /// Pulisce tutti i permessi dell'utente, solitamente chiamato al logout.
+  /// Clears all user permissions, usually called on logout.
   void clearUserPermissions() {
     userGroups.clear();
-    isSuperAdmin.value = null; // Resetta allo stato "sconosciuto"
+    isSuperAdmin.value = null;
     isLoadingPermissions.value = false;
-    _permissionsCompleter = null; // Pulisci anche il completer
-    logInfo('[AuthController] Permessi utente puliti.');
+    _permissionsCompleter = null;
+    logInfo('[AuthController] User permissions cleared.');
   }
 
-  /// Funzione ASINCRONA e ROBUSTA per il router.
-  /// Attende il caricamento dei permessi se non sono ancora pronti.
+  /// Asynchronous and robust function for the router to check admin status.
   Future<bool> checkIsSuperAdmin() async {
-    // Se un caricamento è in corso, attendi che finisca.
     if (isLoadingPermissions.value) {
-      logInfo('[AuthController] Controllo richiesto mentre i permessi sono in caricamento. In attesa...');
       await _permissionsCompleter?.future;
-    }
-    // Se i permessi non sono mai stati caricati (stato iniziale null), avvia il caricamento e attendi.
-    else if (isSuperAdmin.value == null) {
-      logInfo('[AuthController] Stato Super Admin non in cache, avvio caricamento e attesa...');
+    } else if (isSuperAdmin.value == null) {
       await loadPermissions();
     }
-
-    // Ora isSuperAdmin.value è sicuramente non-null (o true o false).
-    logInfo('[AuthController] Controllo Super Admin completato. Risultato: ${isSuperAdmin.value ?? false}');
     return isSuperAdmin.value ?? false;
+  }
+
+  // --- Realtime Presence Management ---
+
+  void _subscribeToOnlineUsers() {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) {
+      logInfo("PRESENCE: User not authenticated, cannot subscribe.");
+      return;
+    }
+
+    if (_onlineUsersChannel != null) {
+      logInfo("PRESENCE: Existing channel found. Removing it to ensure a clean new subscription.");
+      _unsubscribeFromOnlineUsers();
+    }
+
+    _activeUserIds.clear();
+
+    logInfo("PRESENCE: Creating and subscribing to 'online-users' channel.");
+    _onlineUsersChannel = _supabase.channel('online-users');
+
+    _onlineUsersChannel!.onPresenceSync((_) {
+      logInfo('PRESENCE EVENT: SYNC');
+      _reconcileActiveUsers();
+    }).onPresenceJoin((payload) {
+      logInfo('PRESENCE EVENT: JOIN');
+      for (final presence in payload.newPresences) {
+        final userId = presence.payload['user_id'] as String?;
+        if (userId != null) _activeUserIds.add(userId);
+      }
+      _updateConnectedUsersCount();
+    }).onPresenceLeave((payload) {
+      logInfo('PRESENCE EVENT: LEAVE');
+      for (final presence in payload.leftPresences) {
+        final userId = presence.payload['user_id'] as String?;
+        if (userId != null) _activeUserIds.remove(userId);
+      }
+      _updateConnectedUsersCount();
+    }).subscribe((status, [error]) async {
+      logInfo("PRESENCE STATUS: $status");
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        await _onlineUsersChannel!.track({
+          'user_id': userId,
+          'online_at': DateTime.now().toIso8601String(),
+        });
+        logInfo('PRESENCE: Presence tracked for user $userId.');
+      } else if (error != null) {
+        logError('PRESENCE ERROR: $error');
+        _activeUserIds.clear();
+        _updateConnectedUsersCount();
+      }
+    });
+  }
+
+  Future<void> _unsubscribeFromOnlineUsers() async {
+    if (_onlineUsersChannel != null) {
+      logInfo("PRESENCE: Unsubscribing from 'online-users' channel.");
+      await _supabase.removeChannel(_onlineUsersChannel!);
+      _onlineUsersChannel = null;
+      _activeUserIds.clear();
+      _updateConnectedUsersCount();
+    }
+  }
+
+  void _updateConnectedUsersCount() {
+    final newCount = _activeUserIds.length;
+    if (connectedUsers.value != newCount) {
+      connectedUsers.value = newCount;
+    }
+    logInfo('PRESENCE COUNT: Connected users: $newCount');
+  }
+
+  void _reconcileActiveUsers() {
+    if (_onlineUsersChannel == null) return;
+    logInfo("PRESENCE: Reconciling user state...");
+
+    // The presenceState() method returns a List<SinglePresenceState>.
+    final List<SinglePresenceState> presenceStateList = _onlineUsersChannel!.presenceState();
+    final Set<String> remoteUserIds = {};
+
+    // Iterate over each SinglePresenceState in the list.
+    for (final singleState in presenceStateList) {
+      // Each state contains a list of presences for a client. Iterate over them.
+      for (final presence in singleState.presences) {
+        final userId = presence.payload['user_id'] as String?;
+        if (userId != null && userId.isNotEmpty) {
+          remoteUserIds.add(userId);
+        }
+      }
+    }
+
+    if (!_areSetsEqual(_activeUserIds, remoteUserIds)) {
+      logInfo("PRESENCE: Discrepancy detected. Syncing state. Local: $_activeUserIds, Remote: $remoteUserIds");
+      _activeUserIds.clear();
+      _activeUserIds.addAll(remoteUserIds);
+    }
+
+    _updateConnectedUsersCount();
+    logInfo("PRESENCE: Reconciliation complete. Final state: $_activeUserIds");
+  }
+
+  bool _areSetsEqual<T>(Set<T> set1, Set<T> set2) {
+    if (set1.length != set2.length) return false;
+    for (final item in set1) {
+      if (!set2.contains(item)) return false;
+    }
+    return true;
   }
 }
