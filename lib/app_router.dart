@@ -16,6 +16,7 @@ import 'package:una_social/screens/database/personale.dart';
 import 'package:una_social/screens/database_screen.dart';
 import 'package:una_social/screens/home_screen.dart';
 import 'package:una_social/screens/login_screen.dart';
+import 'package:una_social/screens/set_password_screen.dart';
 import 'package:una_social/screens/splash_screen.dart';
 import 'package:una_social/screens/strutture_screen.dart';
 
@@ -50,14 +51,19 @@ class GoRouterRefreshStream extends ChangeNotifier {
 class AppRouter {
   static final List<GoRoute> publicRoutes = [
     GoRoute(
-      path: '/splash', // Path completo: /app/database
+      path: '/splash',
       name: 'splash',
       builder: (context, state) => const SplashScreen(),
     ),
     GoRoute(
-      path: '/login', // Path completo: /app/database
+      path: '/login',
       name: 'login',
       builder: (context, state) => const LoginScreen(),
+    ),
+    GoRoute(
+      path: '/set-password',
+      name: 'set-password',
+      builder: (context, state) => const SetPasswordScreen(),
     ),
   ];
   static final List<GoRoute> superAdminRoutes = [
@@ -205,23 +211,16 @@ class AppRouter {
     ],
     // ...redirect globale ed errorBuilder invariati...
     redirect: (BuildContext context, GoRouterState state) {
-      // ...existing global redirect logic...
-      // (nessuna modifica qui)
       final user = _supabase.auth.currentUser;
-      final session = _supabase.auth.currentSession;
-      final bool loggedIn = session != null;
+      final bool loggedIn = user != null;
       final bool passwordSet = user?.userMetadata?['has_set_password'] as bool? ?? false;
 
       final String currentMatchedLocation = state.matchedLocation;
-      final String requestedUri = state.uri.toString();
+      logInfo('[GoRouter Global Redirect] Matched: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet');
 
-      logInfo('[GoRouter Global Redirect] Matched: $currentMatchedLocation, URI: $requestedUri, LoggedIn: $loggedIn, PwdSet: $passwordSet');
-
-      final List<String> publicPaths = ['/splash', '/login', '/set-password', '/unauthorized'];
-      final bool onPublicPath = publicPaths.contains(currentMatchedLocation) || currentMatchedLocation == '/';
+      final bool onLoginPath = currentMatchedLocation == '/login';
       final bool onSetPasswordPath = currentMatchedLocation == '/set-password';
-
-      logInfo('[aaaaa] currentMatchedLocation: $currentMatchedLocation, loggedIn: $loggedIn, passwordSet: $passwordSet, onPublicPath: $onPublicPath, onSetPasswordPath: $onSetPasswordPath');
+      final bool onPublicPath = ['/splash', '/login', '/set-password', '/unauthorized'].contains(currentMatchedLocation) || currentMatchedLocation == '/';
 
       if (!loggedIn) {
         if (!onPublicPath) {
@@ -229,15 +228,30 @@ class AppRouter {
           return '/login';
         }
       } else {
+        // L'UTENTE È LOGGATO
+
+        // **NUOVA REGOLA FONDAMENTALE:**
+        // Se l'utente è loggato ma si trova ancora sulla pagina di login,
+        // significa che sta completando un flusso (come la verifica OTP).
+        // Non fare nulla e lascia che la pagina gestisca la sua logica.
+        if (onLoginPath) {
+          logInfo('[GoRouter Global Redirect] LoggedIn, but on /login path. No redirect action needed.');
+          return null;
+        }
+
+        // Se la password non è impostata e non siamo già sulla pagina giusta, reindirizza.
         if (!passwordSet && !onSetPasswordPath) {
           logInfo('[GoRouter Global Redirect] LoggedIn, Password NOT set, NOT on /set-password. Redirect to /set-password.');
           return '/set-password';
         }
-        if (passwordSet && (currentMatchedLocation == '/' || currentMatchedLocation == '/splash' || currentMatchedLocation == '/login' || onSetPasswordPath)) {
+
+        // Se l'utente è completamente configurato e si trova su una pagina pubblica/di setup, portalo alla home.
+        if (passwordSet && (currentMatchedLocation == '/' || currentMatchedLocation == '/splash' || onLoginPath || onSetPasswordPath)) {
           logInfo('[GoRouter Global Redirect] LoggedIn, Password SET, on public/setup path. Redirect to /app/home.');
           return '/app/home';
         }
       }
+
       logInfo('[GoRouter Global Redirect] No global redirect action needed for this route.');
       return null;
     },

@@ -17,19 +17,16 @@ const String supabaseUrlEnvKey = 'SUPABASE_URL';
 const String supabaseAnonKeyEnvKey = 'SUPABASE_ANON_KEY';
 
 Future<void> main() async {
-  // 1. Assicura che i binding di Flutter siano pronti
   WidgetsFlutterBinding.ensureInitialized();
   setUrlStrategy(PathUrlStrategy());
 
   logInfo("App avviata. Tentativo di inizializzazione Supabase...");
 
-  // 2. Controlla le variabili d'ambiente Supabase
   const String supabaseUrl = String.fromEnvironment(supabaseUrlEnvKey, defaultValue: '');
   const String supabaseAnonKey = String.fromEnvironment(supabaseAnonKeyEnvKey, defaultValue: '');
 
   if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
-    String errorMessage = "ERRORE CRITICO: Le variabili d'ambiente Supabase non sono definite. "
-        "Assicurati che siano fornite tramite --dart-define.";
+    String errorMessage = "ERRORE CRITICO: Le variabili d'ambiente Supabase non sono definite.";
     logError(errorMessage);
     runApp(SupabaseErrorApp(error: errorMessage));
     return;
@@ -38,7 +35,6 @@ Future<void> main() async {
   logInfo("Supabase URL (da --dart-define): $supabaseUrl");
 
   try {
-    // 1. Inizializza Supabase (questo non attende la sessione dall'URL)
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
@@ -47,52 +43,56 @@ Future<void> main() async {
       ),
       debug: true,
     );
-    logInfo("Supabase inizializzato con successo.");
+    logInfo("Client Supabase inizializzato. In attesa di uno stato di autenticazione stabile...");
 
-    // 2. --- LA SOLUZIONE ALLA RACE CONDITION ---
-    // Creiamo un "cancello" (un Completer) che si aprirà solo quando
-    // avremo ricevuto la conferma della sessione iniziale.
-    final completer = Completer<void>();
+    // --- CANCELLO DI SINCRONIZZAZIONE ROBUSTO ---
+    final authCompleter = Completer<void>();
     StreamSubscription? subscription;
-
-    subscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      // Attendiamo l'evento che ci dice che Supabase ha finito di controllare
-      // sia il local storage sia l'URL.
-      if (data.event == AuthChangeEvent.initialSession) {
-        logInfo("Evento 'initialSession' ricevuto. Lo stato di autenticazione è stabile.");
-        // Abbiamo la nostra risposta. Apriamo il cancello.
-        if (!completer.isCompleted) {
-          completer.complete();
+    subscription = Supabase.instance.client.auth.onAuthStateChange.listen(
+      (data) {
+        final event = data.event;
+        // Lo stato è considerato STABILE e PRONTO in questi casi:
+        if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.tokenRefreshed || event == AuthChangeEvent.passwordRecovery) {
+          // <-- AGGIUNGI QUESTA CONDIZIONE
+          logInfo("Stato di autenticazione PRONTO ($event). Sblocco dell'app.");
+          if (!authCompleter.isCompleted) {
+            authCompleter.complete();
+            subscription?.cancel();
+          }
         }
-        // Cancelliamo la sottoscrizione per non interferire con GoRouter.
-        subscription?.cancel();
-      }
-    }, onError: (error) {
-      logError("Errore nel flusso di autenticazione iniziale: $error");
-      if (!completer.isCompleted) {
-        completer.completeError(error);
-      }
-      subscription?.cancel();
-    });
+        // Oppure se è la primissima sessione e NON c'è un utente (avvio a freddo senza login)
+        else if (event == AuthChangeEvent.initialSession && data.session == null) {
+          logInfo("Stato di autenticazione PRONTO (Nessun utente). Sblocco dell'app.");
+          if (!authCompleter.isCompleted) {
+            authCompleter.complete();
+            subscription?.cancel();
+          }
+        }
+      },
+      onError: (error) {
+        logError("Errore critico nel flusso di autenticazione: $error");
+        if (!authCompleter.isCompleted) {
+          authCompleter.completeError(error);
+          subscription?.cancel();
+        }
+      },
+    );
 
-    // 3. Attendiamo che il cancello si apra.
-    // L'app rimarrà "bloccata" qui finché l'evento initialSession non arriva.
-    await completer.future;
+    // L'app attenderà qui finché il token non sarà valido o la sessione non sarà confermata come inesistente.
+    await authCompleter.future;
+    logInfo("Sincronizzazione autenticazione completata. Inizializzo i controller.");
 
-    // 4. Inizializza i controller di GetX dopo che Supabase è pronto
     Get.put(AuthController(), permanent: true);
     Get.put(PersonaleController(), permanent: true);
     Get.put(EsterniController(), permanent: true);
-
-    logInfo("[Main] AuthController inizializzato con GetX.");
+    logInfo("[Main] Tutti i controller sono stati inizializzati.");
   } catch (e, stackTrace) {
-    logError("ERRORE CRITICO durante l'inizializzazione di Supabase:", e, stackTrace);
+    logError("ERRORE CRITICO durante l'inizializzazione:", e, stackTrace);
     runApp(SupabaseErrorApp(error: "Errore inizializzazione Supabase: ${e.toString()}"));
     return;
   }
 
-  // 5. Avvia l'applicazione principale SOLO DOPO che tutto è pronto.
-  logInfo("Avvio MyApp...");
+  logInfo("Avvio dell'interfaccia utente (MyApp)...");
   runApp(const MyApp());
 }
 
@@ -101,7 +101,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Usa GetMaterialApp.router per l'integrazione con GoRouter
     return GetMaterialApp.router(
       title: 'Una Social',
       theme: ThemeData(
@@ -135,16 +134,12 @@ class SupabaseErrorApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      theme: ThemeData.light(useMaterial3: true),
-      darkTheme: ThemeData.dark(useMaterial3: true),
-      themeMode: ThemeMode.system,
       home: Scaffold(
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(20.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 60),
                 const SizedBox(height: 20),
@@ -158,12 +153,6 @@ class SupabaseErrorApp extends StatelessWidget {
                   error,
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-                const SizedBox(height: 25),
-                const Text(
-                  'Verifica la connessione e le variabili d\'ambiente, poi riavvia l\'applicazione.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey),
                 ),
               ],
             ),

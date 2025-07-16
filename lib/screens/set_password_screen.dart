@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:logging/logging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/helpers/snackbar_helper.dart';
+import 'package:flutter_pw_validator/flutter_pw_validator.dart';
+import 'package:flutter_pw_validator/Resource/Strings.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -19,21 +21,34 @@ class SetPasswordScreen extends StatefulWidget {
 class _SetPasswordScreenState extends State<SetPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _passwordController = TextEditingController();
-  bool _isLoading = false;
+  final _checkPasswordController = TextEditingController();
 
-  // Non servono più _email e _token qui
+  bool _isLoading = false;
+  bool _isPasswordStrongEnough = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _passwordController.addListener(() {
+      if (mounted) {
+        _formKey.currentState?.validate();
+      }
+    });
+  }
 
   @override
   void dispose() {
     _passwordController.dispose();
+    _checkPasswordController.dispose();
     super.dispose();
   }
 
   Future<void> _setNewPassword() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate() || !_isPasswordStrongEnough) {
+      SnackbarHelper.showErrorSnackbar(context, 'La password non soddisfa tutti i requisiti.');
+      return;
+    }
 
-    // L'utente è già autenticato in questo punto, grazie al link di invito.
-    // Dobbiamo solo aggiornare i suoi dati.
     if (supabase.auth.currentUser == null) {
       Logger('SetPasswordScreen').severe('Tentativo di impostare la password senza un utente loggato.');
       SnackbarHelper.showErrorSnackbar(context, 'Sessione non valida. Riprova il login.');
@@ -44,20 +59,15 @@ class _SetPasswordScreenState extends State<SetPasswordScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Aggiorna l'utente attualmente loggato con la nuova password
-      // e imposta il flag nei metadati per completare la registrazione.
       await supabase.auth.updateUser(
         UserAttributes(
           password: _passwordController.text.trim(),
-          data: const {'has_set_password': true}, // Fondamentale per il redirect globale
+          data: const {'has_set_password': true},
         ),
       );
 
-      Logger('SetPasswordScreen').info('Password impostata e registrazione completata per: ${supabase.auth.currentUser!.email}');
-      SnackbarHelper.showSuccessSnackbar(context, 'Benvenuto! Registrazione completata con successo.');
-
-      // Reindirizza l'utente alla schermata di benvenuto
-      context.go('/home');
+      Logger('SetPasswordScreen').info('Password impostata per: ${supabase.auth.currentUser!.email}');
+      SnackbarHelper.showSuccessSnackbar(context, 'Benvenuto! Registrazione completata.');
     } catch (e) {
       Logger('SetPasswordScreen').severe('Errore durante l\'aggiornamento della password: $e');
       SnackbarHelper.showErrorSnackbar(context, 'Errore: ${e.toString()}');
@@ -72,45 +82,89 @@ class _SetPasswordScreenState extends State<SetPasswordScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Completa la Registrazione')),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20.0),
+      // **INIZIO DELLA NUOVA STRUTTURA DI LAYOUT**
+      body: SingleChildScrollView(
+        // 1. Il SingleChildScrollView è il widget principale, permette lo scroll verticale.
+        child: Align(
+          // 2. Align centra il suo figlio orizzontalmente nella larghezza disponibile.
+          //    Non tenta di centrare verticalmente, evitando conflitti.
+          alignment: Alignment.topCenter,
           child: ConstrainedBox(
+            // 3. Limita la larghezza massima del form per una buona leggibilità su schermi grandi.
             constraints: const BoxConstraints(maxWidth: 400),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Crea la tua password di accesso',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 20),
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Nuova Password'),
-                    validator: (value) {
-                      if (value == null || value.length < 6) {
-                        return 'La password deve avere almeno 6 caratteri';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _setNewPassword,
-                    child: _isLoading ? const CircularProgressIndicator() : const Text('Salva e Accedi'),
-                  ),
-                ],
+            child: Padding(
+              // 4. Aggiunge spazio attorno al form.
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Crea la tua password di accesso',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    FlutterPwValidator(
+                      controller: _passwordController,
+                      minLength: 6,
+                      uppercaseCharCount: 1,
+                      lowercaseCharCount: 1,
+                      numericCharCount: 1,
+                      specialCharCount: 1,
+                      width: 400,
+                      height: 150,
+                      strings: ItalianPasswordValidatorStrings(),
+                      onSuccess: () {
+                        if (mounted) setState(() => _isPasswordStrongEnough = true);
+                      },
+                      onFail: () {
+                        if (mounted) setState(() => _isPasswordStrongEnough = false);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _checkPasswordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Conferma Password',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value != _passwordController.text) {
+                          return 'Le password non coincidono';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                      onPressed: _isLoading ? null : _setNewPassword,
+                      child: _isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Salva e Accedi'),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
+      // **FINE DELLA NUOVA STRUTTURA DI LAYOUT**
     );
   }
+}
+
+class ItalianPasswordValidatorStrings extends FlutterPwValidatorStrings {
+  @override
+  String get atLeast => 'Almeno - caratteri';
+  @override
+  String get normalLetters => '- lettere minuscole';
+  @override
+  String get uppercaseLetters => '- lettere maiuscole';
+  @override
+  String get numericCharacters => '- caratteri numerici';
+  @override
+  String get specialCharacters => '- caratteri speciali';
 }
