@@ -20,7 +20,8 @@ class SetPasswordScreen extends StatefulWidget {
 
 class _SetPasswordScreenState extends State<SetPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _passwordController = TextEditingController();
+
+  final _newPasswordController = TextEditingController();
   final _checkPasswordController = TextEditingController();
 
   bool _isLoading = false;
@@ -29,7 +30,7 @@ class _SetPasswordScreenState extends State<SetPasswordScreen> {
   @override
   void initState() {
     super.initState();
-    _passwordController.addListener(() {
+    _newPasswordController.addListener(() {
       if (mounted) {
         _formKey.currentState?.validate();
       }
@@ -38,7 +39,7 @@ class _SetPasswordScreenState extends State<SetPasswordScreen> {
 
   @override
   void dispose() {
-    _passwordController.dispose();
+    _newPasswordController.dispose();
     _checkPasswordController.dispose();
     super.dispose();
   }
@@ -61,7 +62,7 @@ class _SetPasswordScreenState extends State<SetPasswordScreen> {
     try {
       await supabase.auth.updateUser(
         UserAttributes(
-          password: _passwordController.text.trim(),
+          password: _newPasswordController.text.trim(),
           data: const {'has_set_password': true},
         ),
       );
@@ -107,14 +108,14 @@ class _SetPasswordScreenState extends State<SetPasswordScreen> {
                     ),
                     const SizedBox(height: 24),
                     FlutterPwValidator(
-                      controller: _passwordController,
+                      controller: _newPasswordController,
                       minLength: 6,
                       uppercaseCharCount: 1,
                       lowercaseCharCount: 1,
                       numericCharCount: 1,
                       specialCharCount: 1,
                       width: 400,
-                      height: 150,
+                      height: 250,
                       strings: ItalianPasswordValidatorStrings(),
                       onSuccess: () {
                         if (mounted) setState(() => _isPasswordStrongEnough = true);
@@ -125,6 +126,14 @@ class _SetPasswordScreenState extends State<SetPasswordScreen> {
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
+                      controller: _newPasswordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Nuova Password',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    TextFormField(
                       controller: _checkPasswordController,
                       obscureText: true,
                       decoration: const InputDecoration(
@@ -132,7 +141,7 @@ class _SetPasswordScreenState extends State<SetPasswordScreen> {
                         border: OutlineInputBorder(),
                       ),
                       validator: (value) {
-                        if (value != _passwordController.text) {
+                        if (value != _newPasswordController.text) {
                           return 'Le password non coincidono';
                         }
                         return null;

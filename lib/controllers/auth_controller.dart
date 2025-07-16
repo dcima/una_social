@@ -215,22 +215,22 @@ class AuthController extends GetxController {
     if (_onlineUsersChannel == null) return;
     logInfo("PRESENCE: Reconciling user state...");
 
+    // 1. Chiama la tua funzione helper corretta.
     final List<SinglePresenceState> presenceStateList = _onlineUsersChannel!.presenceState();
-    final Set<String> remoteUserIds = {};
 
-    for (final singleState in presenceStateList) {
-      for (final presence in singleState.presences) {
-        final userId = presence.payload['user_id'] as String?;
-        if (userId != null && userId.isNotEmpty) {
-          remoteUserIds.add(userId);
-        }
-      }
-    }
+    // 2. Estrai gli ID. La logica ora è più semplice.
+    final Set<String> remoteUserIds = presenceStateList
+        .expand((state) => state.presences) // Appiattisce le liste di Presence
+        .map((p) => p.payload['user_id'] as String?) // Estrae gli ID
+        .whereType<String>() // Filtra i null e tipizza a String
+        .toSet(); // Crea il Set
 
+    // 3. Il resto della logica rimane invariato
     if (!_areSetsEqual(_activeUserIds, remoteUserIds)) {
       logInfo("PRESENCE: Discrepancy detected. Syncing state. Local: $_activeUserIds, Remote: $remoteUserIds");
-      _activeUserIds.clear();
-      _activeUserIds.addAll(remoteUserIds);
+      _activeUserIds
+        ..clear()
+        ..addAll(remoteUserIds);
     }
 
     _updateConnectedUsersCount();

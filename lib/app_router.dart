@@ -213,46 +213,48 @@ class AppRouter {
     redirect: (BuildContext context, GoRouterState state) {
       final user = _supabase.auth.currentUser;
       final bool loggedIn = user != null;
+
+      // NOTA: Controlla se 'has_set_password' esiste davvero nei tuoi metadati.
+      // Se non esiste, questo sarà sempre 'false'.
       final bool passwordSet = user?.userMetadata?['has_set_password'] as bool? ?? false;
 
-      final String currentMatchedLocation = state.matchedLocation;
-      logInfo('[GoRouter Global Redirect] Matched: $currentMatchedLocation, LoggedIn: $loggedIn, PwdSet: $passwordSet');
+      final String location = state.matchedLocation;
+      logInfo('[GoRouter] Evaluating: Path="$location", LoggedIn=$loggedIn, PasswordSet=$passwordSet');
 
-      final bool onLoginPath = currentMatchedLocation == '/login';
-      final bool onSetPasswordPath = currentMatchedLocation == '/set-password';
-      final bool onPublicPath = ['/splash', '/login', '/set-password', '/unauthorized'].contains(currentMatchedLocation) || currentMatchedLocation == '/';
-
-      if (!loggedIn) {
-        if (!onPublicPath) {
-          logInfo('[GoRouter Global Redirect] NOT LoggedIn, NOT on public path. Redirect to /login.');
-          return '/login';
-        }
-      } else {
-        // L'UTENTE È LOGGATO
-
-        // **NUOVA REGOLA FONDAMENTALE:**
-        // Se l'utente è loggato ma si trova ancora sulla pagina di login,
-        // significa che sta completando un flusso (come la verifica OTP).
-        // Non fare nulla e lascia che la pagina gestisca la sua logica.
-        if (onLoginPath) {
-          logInfo('[GoRouter Global Redirect] LoggedIn, but on /login path. No redirect action needed.');
-          return null;
-        }
-
-        // Se la password non è impostata e non siamo già sulla pagina giusta, reindirizza.
-        if (!passwordSet && !onSetPasswordPath) {
-          logInfo('[GoRouter Global Redirect] LoggedIn, Password NOT set, NOT on /set-password. Redirect to /set-password.');
+      // --- PRIORITÀ 1: L'utente è loggato ma non ha impostato la password ---
+      // Questo è il caso più importante da gestire.
+      if (loggedIn && !passwordSet) {
+        // Se non si trova GIÀ sulla pagina per impostare la password, ce lo mandiamo.
+        if (location != '/set-password') {
+          logInfo('[GoRouter] Redirect: Logged in but password not set. Forcing -> /set-password');
           return '/set-password';
         }
+        // Se è già lì, non facciamo nulla per evitare loop di redirect.
+        return null;
+      }
 
-        // Se l'utente è completamente configurato e si trova su una pagina pubblica/di setup, portalo alla home.
-        if (passwordSet && (currentMatchedLocation == '/' || currentMatchedLocation == '/splash' || onLoginPath || onSetPasswordPath)) {
-          logInfo('[GoRouter Global Redirect] LoggedIn, Password SET, on public/setup path. Redirect to /app/home.');
+      // --- PRIORITÀ 2: L'utente è completamente autenticato e configurato ---
+      if (loggedIn && passwordSet) {
+        // Se per qualche motivo finisce su una pagina di setup/pubblica, lo mandiamo alla home.
+        final bool onSetupOrPublicPath = location == '/splash' || location == '/login' || location == '/set-password' || location == '/';
+        if (onSetupOrPublicPath) {
+          logInfo('[GoRouter] Redirect: Fully authenticated user on a public/setup page. Forcing -> /app/home');
           return '/app/home';
         }
       }
 
-      logInfo('[GoRouter Global Redirect] No global redirect action needed for this route.');
+      // --- PRIORITÀ 3: L'utente non è loggato ---
+      if (!loggedIn) {
+        final bool isPublicPath = ['/splash', '/login', '/set-password', '/unauthorized'].contains(location) || location == '/';
+        // Se cerca di accedere a una pagina protetta, lo mandiamo al login.
+        if (!isPublicPath) {
+          logInfo('[GoRouter] Redirect: Not logged in and accessing a protected page. Forcing -> /login');
+          return '/login';
+        }
+      }
+
+      // Se nessuna delle regole precedenti ha attivato un redirect, la navigazione è permessa.
+      logInfo('[GoRouter] No redirect needed for this route.');
       return null;
     },
     errorBuilder: (context, state) {
