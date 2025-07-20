@@ -3,13 +3,17 @@ import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/helpers/logger_helper.dart';
 
+// La classe deve chiamarsi ProfileController e estendere GetxController
 class ProfileController extends GetxController {
   final SupabaseClient _supabase = Supabase.instance.client;
 
+  // Usiamo le variabili reattive di GetX con .obs
   final RxBool hasAcceptedRelationships = false.obs;
   final RxBool isLoading = false.obs;
 
+  // Questo è il metodo che useremo nel router
   Future<void> checkUserRelationships() async {
+    // Se l'utente non è loggato, esci subito
     if (_supabase.auth.currentUser == null) {
       hasAcceptedRelationships.value = false;
       return;
@@ -17,15 +21,15 @@ class ProfileController extends GetxController {
 
     isLoading.value = true;
     try {
-      // --- INIZIO SINTASSI CORRETTA ---
-      // La nuova sintassi non usa FetchOptions, ma passa 'count' direttamente
-      // nella chiamata a .from(). Il risultato è un PostgrestResponse.
-      final response = await _supabase.from('relationships').select('user_one_id', count: CountOption.exact).eq('status', 'accepted').or('user_one_id.eq.${_supabase.auth.currentUser!.id},user_two_id.eq.${_supabase.auth.currentUser!.id}');
+      // Usiamo la sintassi corretta per ottenere il conteggio
+      final count = await _supabase
+          .from('relationships')
+          .count(CountOption.exact) // Questo è il modo giusto
+          .eq('status', 'accepted')
+          .or('user_one_id.eq.${_supabase.auth.currentUser!.id},user_two_id.eq.${_supabase.auth.currentUser!.id}');
 
-      // Il conteggio si trova in response.count
-      final count = response.count;
-      hasAcceptedRelationships.value = (count ?? 0) > 0;
-      // --- FINE SINTASSI CORRETTA ---
+      // Aggiorniamo il valore della variabile reattiva
+      hasAcceptedRelationships.value = count > 0;
 
       logInfo("[ProfileController] Controllo relazioni: ${hasAcceptedRelationships.value} ($count trovate)");
     } catch (e, stackTrace) {
@@ -36,6 +40,7 @@ class ProfileController extends GetxController {
     }
   }
 
+  // Metodo per resettare lo stato al logout
   void reset() {
     hasAcceptedRelationships.value = false;
   }
