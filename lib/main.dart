@@ -11,6 +11,7 @@ import 'package:una_social/app_router.dart';
 import 'package:una_social/controllers/auth_controller.dart';
 import 'package:una_social/controllers/esterni_controller.dart';
 import 'package:una_social/controllers/personale_controller.dart';
+import 'package:una_social/controllers/profile_controller.dart'; // <-- 1. IMPORTA IL NUOVO CONTROLLER
 import 'package:una_social/helpers/logger_helper.dart';
 
 const String supabaseUrlEnvKey = 'SUPABASE_URL';
@@ -51,17 +52,13 @@ Future<void> main() async {
     subscription = Supabase.instance.client.auth.onAuthStateChange.listen(
       (data) {
         final event = data.event;
-        // Lo stato è considerato STABILE e PRONTO in questi casi:
         if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.tokenRefreshed || event == AuthChangeEvent.passwordRecovery) {
-          // <-- AGGIUNGI QUESTA CONDIZIONE
           logInfo("Stato di autenticazione PRONTO ($event). Sblocco dell'app.");
           if (!authCompleter.isCompleted) {
             authCompleter.complete();
             subscription?.cancel();
           }
-        }
-        // Oppure se è la primissima sessione e NON c'è un utente (avvio a freddo senza login)
-        else if (event == AuthChangeEvent.initialSession && data.session == null) {
+        } else if (event == AuthChangeEvent.initialSession && data.session == null) {
           logInfo("Stato di autenticazione PRONTO (Nessun utente). Sblocco dell'app.");
           if (!authCompleter.isCompleted) {
             authCompleter.complete();
@@ -78,13 +75,13 @@ Future<void> main() async {
       },
     );
 
-    // L'app attenderà qui finché il token non sarà valido o la sessione non sarà confermata come inesistente.
     await authCompleter.future;
     logInfo("Sincronizzazione autenticazione completata. Inizializzo i controller.");
 
     Get.put(AuthController(), permanent: true);
     Get.put(PersonaleController(), permanent: true);
     Get.put(EsterniController(), permanent: true);
+    Get.put(ProfileController(), permanent: true); // <-- 2. INIETTA IL NUOVO CONTROLLER
     logInfo("[Main] Tutti i controller sono stati inizializzati.");
   } catch (e, stackTrace) {
     logError("ERRORE CRITICO durante l'inizializzazione:", e, stackTrace);
@@ -101,6 +98,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Nessuna modifica necessaria qui. GetMaterialApp.router è corretto.
     return GetMaterialApp.router(
       title: 'Una Social',
       theme: ThemeData(
@@ -127,6 +125,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// Nessuna modifica necessaria a SupabaseErrorApp
 class SupabaseErrorApp extends StatelessWidget {
   final String error;
   const SupabaseErrorApp({super.key, required this.error});
