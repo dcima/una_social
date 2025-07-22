@@ -7,17 +7,19 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Screen Imports
 import 'package:una_chat/screens/una_chat_main_screen.dart';
-import 'package:una_social/screens/splash_screen.dart';
-import 'package:una_social/screens/login_screen.dart';
-import 'package:una_social/screens/set_password_screen.dart';
-import 'package:una_social/screens/home_screen.dart';
+// NOTA: Usa i percorsi relativi corretti per il tuo progetto
+import 'package:una_social/screens/colleghi_screen.dart';
 import 'package:una_social/screens/database_screen.dart';
 import 'package:una_social/screens/database/ambiti.dart';
 import 'package:una_social/screens/database/campus.dart';
 import 'package:una_social/screens/database/docenti_inesistenti.dart';
 import 'package:una_social/screens/database/personale.dart';
-import 'package:una_social/screens/strutture_screen.dart';
+import 'package:una_social/screens/home_screen.dart';
 import 'package:una_social/screens/import_contacts_screen.dart';
+import 'package:una_social/screens/login_screen.dart';
+import 'package:una_social/screens/set_password_screen.dart';
+import 'package:una_social/screens/splash_screen.dart';
+import 'package:una_social/screens/strutture_screen.dart';
 
 // Controller Imports
 import 'package:una_social/controllers/auth_controller.dart';
@@ -55,8 +57,13 @@ class GoRouterRefreshStream extends ChangeNotifier {
   }
 }
 
+// L'enum può essere semplificato se usi i nomi come stringhe
+enum AppRoute {
+  importContacts,
+  colleghi,
+}
+
 class AppRouter {
-  // Navigator key per lo ShellRoute
   static final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
   static final List<GoRoute> publicRoutes = [
@@ -77,7 +84,7 @@ class AppRouter {
     await profileController.checkUserRelationships();
     if (!profileController.hasAcceptedRelationships.value) {
       logInfo("[Router Social] Utente senza contatti. Reindirizzo da ${state.matchedLocation} a /app/import-contacts");
-      return '/app/import-contacts';
+      return '/app/import-contacts'; // Questo reindirizzamento ora funzionerà
     }
     logInfo("[Router Social] Utente con contatti. Accesso a ${state.matchedLocation} consentito.");
     return null;
@@ -85,26 +92,39 @@ class AppRouter {
 
   static final GoRouter router = GoRouter(
     initialLocation: '/splash',
+    debugLogDiagnostics: true, // UTILISSIMO per debuggare, lascialo attivo per ora
     refreshListenable: GoRouterRefreshStream(_supabase.auth.onAuthStateChange),
     routes: [
       ...publicRoutes,
-      ...superAdminRoutes, // Le route SuperAdmin ora sono a livello principale
+      ...superAdminRoutes,
 
-      // --- INIZIO SOSTITUZIONE CON SHELLROUTE ---
+      // --- MODIFICA CHIAVE ---
+      // La rotta per l'importazione dei contatti è ora una rotta di primo livello.
+      // Non è più dentro la ShellRoute.
+      GoRoute(
+        path: '/app/import-contacts', // Il percorso ora corrisponde a quello del redirect
+        name: AppRoute.importContacts.name,
+        builder: (context, state) => const ImportContactsScreen(),
+        routes: [
+          // La rotta figlia è definita correttamente qui
+          GoRoute(
+            path: 'colleghi', // Il percorso completo sarà /app/import-contacts/colleghi
+            name: AppRoute.colleghi.name,
+            builder: (context, state) => const ColleghiScreen(),
+          ),
+        ],
+      ),
+
+      // ShellRoute per le schermate principali che condividono la UI (HomeScreen)
       ShellRoute(
         navigatorKey: _shellNavigatorKey,
-        // --- INIZIO CORREZIONE ---
         builder: (context, state, child) {
-          // Leggiamo il nome della rotta corrente dallo stato della navigazione.
-          // Usiamo un valore di fallback per sicurezza.
           final screenName = state.topRoute?.name ?? 'Home';
-
-          // Passiamo il nome dinamico al widget HomeScreen.
           return HomeScreen(screenName: screenName, child: child);
         },
-        // --- FINE CORREZIONE ---
-        // Le rotte figlie dello ShellRoute.
         routes: [
+          // Le rotte figlie della ShellRoute.
+          // La rotta 'import-contacts' è stata rimossa da qui.
           GoRoute(
             path: '/app/home',
             name: 'home',
@@ -119,26 +139,13 @@ class AppRouter {
             path: '/app/chat',
             name: 'chat',
             builder: (context, state) => UnaChatMainScreen(),
-            redirect: _socialRedirect, // Il redirect ora funzionerà come previsto
-          ),
-          GoRoute(
-            path: '/app/import-contacts',
-            name: 'import-contacts',
-            builder: (context, state) => const ImportContactsScreen(),
-            redirect: (context, state) async {
-              await profileController.checkUserRelationships();
-              if (profileController.hasAcceptedRelationships.value) {
-                logInfo("[Router] Utente su import-contacts ma con amici. Reindirizzo a /app/chat.");
-                return '/app/chat';
-              }
-              return null;
-            },
+            redirect: _socialRedirect,
           ),
         ],
       ),
-      // --- FINE SOSTITUZIONE CON SHELLROUTE ---
     ],
     redirect: (BuildContext context, GoRouterState state) {
+      // ... Il tuo redirect globale rimane invariato ...
       final user = _supabase.auth.currentUser;
       final bool loggedIn = user != null;
       final bool passwordSet = user?.userMetadata?['has_set_password'] as bool? ?? false;
@@ -174,6 +181,7 @@ class AppRouter {
       return null;
     },
     errorBuilder: (context, state) {
+      // ... Il tuo errorBuilder rimane invariato ...
       logError('[GoRouter ErrorBuilder] URI: ${state.uri}, Errore: ${state.error}');
       return Scaffold(
         appBar: AppBar(title: const Text('Errore Navigazione')),

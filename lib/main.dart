@@ -83,6 +83,14 @@ Future<void> main() async {
     Get.put(EsterniController(), permanent: true);
     Get.put(ProfileController(), permanent: true); // <-- 2. INIETTA IL NUOVO CONTROLLER
     logInfo("[Main] Tutti i controller sono stati inizializzati.");
+  } on AuthApiException catch (e) {
+    // ERRORE SPECIFICO: La sessione salvata nel browser non è valida.
+    print('>>> Errore di autenticazione durante l' 'init: ${e.message}');
+    print('>>> La sessione salvata è corrotta o non valida. Eseguo il logout forzato per pulirla.');
+
+    // AZIONE CORRETTIVA: Esegui un logout. Questo pulirà la sessione
+    // invalida dal localStorage del browser.
+    await Supabase.instance.client.auth.signOut();
   } catch (e, stackTrace) {
     logError("ERRORE CRITICO durante l'inizializzazione:", e, stackTrace);
     runApp(SupabaseErrorApp(error: "Errore inizializzazione Supabase: ${e.toString()}"));
