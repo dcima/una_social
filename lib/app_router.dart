@@ -73,18 +73,22 @@ class AppRouter {
   ];
 
   static final List<GoRoute> superAdminRoutes = [
-    GoRoute(path: '/app/database', name: 'database', builder: (context, state) => const DatabaseScreen(), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(path: '/app/ambiti', name: 'ambiti', builder: (context, state) => const AmbitiScreen(), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(path: '/app/campus', name: 'campus', builder: (context, state) => const CampusScreen(), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(path: '/app/docenti_inesistenti', name: 'docenti_inesistenti', builder: (context, state) => const DocentiInesistentiScreen(), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(path: '/app/personale', name: 'personale', builder: (context, state) => const PersonaleScreen(), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(path: '/app/database', name: 'database', builder: (context, state) => HomeScreen(screenName: "Database", child: DatabaseScreen()), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(path: '/app/ambiti', name: 'ambiti', builder: (context, state) => HomeScreen(screenName: "Ambiti", child: AmbitiScreen()), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(path: '/app/campus', name: 'campus', builder: (context, state) => HomeScreen(screenName: "Campus", child: CampusScreen()), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(
+        path: '/app/docenti_inesistenti',
+        name: 'docenti_inesistenti',
+        builder: (context, state) => HomeScreen(screenName: "Docenti inesistenti", child: DocentiInesistentiScreen()),
+        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(path: '/app/personale', name: 'personale', builder: (context, state) => HomeScreen(screenName: "Personale", child: PersonaleScreen()), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
   ];
 
   static FutureOr<String?> _socialRedirect(BuildContext context, GoRouterState state) async {
     await profileController.checkUserRelationships();
     if (!profileController.hasAcceptedRelationships.value) {
       logInfo("[Router Social] Utente senza contatti. Reindirizzo da ${state.matchedLocation} a /app/import-contacts");
-      return '/app/import-contacts'; // Questo reindirizzamento ora funzionerà
+      return '/app/import-contacts'; // Restituisci il percorso come stringa per il redirect
     }
     logInfo("[Router Social] Utente con contatti. Accesso a ${state.matchedLocation} consentito.");
     return null;
@@ -104,13 +108,13 @@ class AppRouter {
       GoRoute(
         path: '/app/import-contacts', // Il percorso ora corrisponde a quello del redirect
         name: AppRoute.importContacts.name,
-        builder: (context, state) => const ImportContactsScreen(),
+        builder: (context, state) => HomeScreen(screenName: "Importa contatti", child: ImportContactsScreen()),
         routes: [
           // La rotta figlia è definita correttamente qui
           GoRoute(
             path: 'colleghi', // Il percorso completo sarà /app/import-contacts/colleghi
             name: AppRoute.colleghi.name,
-            builder: (context, state) => const ColleghiScreen(),
+            builder: (context, state) => HomeScreen(screenName: "Colleghi", child: ColleghiScreen()),
           ),
         ],
       ),
@@ -133,12 +137,12 @@ class AppRouter {
           GoRoute(
             path: '/app/strutture',
             name: 'strutture',
-            builder: (context, state) => StruttureScreen(),
+            builder: (context, state) => HomeScreen(screenName: "Strutture", child: StruttureScreen()),
           ),
           GoRoute(
             path: '/app/chat',
             name: 'chat',
-            builder: (context, state) => UnaChatMainScreen(),
+            builder: (context, state) => HomeScreen(screenName: "Chat", child: UnaChatMainScreen()),
             redirect: _socialRedirect,
           ),
         ],

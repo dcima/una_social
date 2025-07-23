@@ -1,7 +1,7 @@
 // models/struttura.dart
 
 class Struttura {
-  final String universita;
+  final String ente;
   final String id;
   final String? nome;
   final String? indirizzo;
@@ -12,7 +12,7 @@ class Struttura {
   final String? latitudine;
 
   // Campi calcolati opzionali
-  String get chiaveComposita => '$universita-$id'; // Un modo per rappresentare la PK
+  String get chiaveComposita => '$ente-$id'; // Un modo per rappresentare la PK
 
   double? get longitudineAsDouble {
     if (longitudine == null) return null;
@@ -25,7 +25,7 @@ class Struttura {
   }
 
   Struttura({
-    required this.universita,
+    required this.ente,
     required this.id,
     this.nome,
     this.indirizzo,
@@ -38,7 +38,7 @@ class Struttura {
 
   factory Struttura.fromJson(Map<String, dynamic> json) {
     return Struttura(
-      universita: json['universita'] as String? ?? '', // Fallback per robustezza se il JSON è malformato
+      ente: json['ente'] as String? ?? '', // Fallback per robustezza se il JSON è malformato
       id: (json['id']?.toString() ?? ''), // Fallback
       nome: json['nome'] as String?,
       indirizzo: json['indirizzo'] as String?,
@@ -52,7 +52,7 @@ class Struttura {
 
   Map<String, dynamic> toJson() {
     final Map<String, dynamic> data = {
-      'universita': universita,
+      'ente': ente,
       'id': id,
       'nome': nome,
       'indirizzo': indirizzo,
@@ -71,24 +71,24 @@ class Struttura {
   // Utile per il debug e per le liste
   @override
   String toString() {
-    return 'Struttura(universita: $universita, id: $id, nome: $nome, citta: $citta)';
+    return 'Struttura(ente: $ente, id: $id, nome: $nome, citta: $citta)';
   }
 
   // È buona prassi implementare hashCode e operator== se si prevede di
   // usare questi oggetti in Set, come chiavi in Map, o confrontarli.
-  // La chiave primaria è (universita, id).
+  // La chiave primaria è (ente, id).
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is Struttura && other.universita == universita && other.id == id;
+    return other is Struttura && other.ente == ente && other.id == id;
   }
 
   @override
-  int get hashCode => universita.hashCode ^ id.hashCode;
+  int get hashCode => ente.hashCode ^ id.hashCode;
 
   // Metodo copyWith per creare facilmente una copia modificata (utile con stati immutabili)
   Struttura copyWith({
-    String? universita,
+    String? ente,
     String? id,
     String? nome,
     String? indirizzo,
@@ -99,7 +99,7 @@ class Struttura {
     String? latitudine,
   }) {
     return Struttura(
-      universita: universita ?? this.universita,
+      ente: ente ?? this.ente,
       id: id ?? this.id,
       nome: nome ?? this.nome,
       indirizzo: indirizzo ?? this.indirizzo,
