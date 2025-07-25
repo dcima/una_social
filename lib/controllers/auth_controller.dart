@@ -8,6 +8,8 @@ import 'package:una_social/helpers/logger_helper.dart';
 class AuthController extends GetxController {
   final SupabaseClient _supabase = Supabase.instance.client;
 
+  String? lastUserEmail;
+
   // --- STATI OSSERVABILI ---
   final RxList<String> userGroups = <String>[].obs;
   final Rxn<bool> isSuperAdmin = Rxn<bool>();
@@ -45,6 +47,7 @@ class AuthController extends GetxController {
     if (session != null) {
       // We only need to react when the user state actually changes.
       if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession || event == AuthChangeEvent.tokenRefreshed) {
+        lastUserEmail = _supabase.auth.currentUser?.email;
         logInfo('[AuthController] Session available. Loading permissions and subscribing to presence.');
         loadPermissions();
         _subscribeToOnlineUsers();

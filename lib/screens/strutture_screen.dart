@@ -13,7 +13,7 @@ class StruttureScreen extends StatefulWidget implements DBGridProvider {
       : _internalGridConfig = DBGridConfig(
           // Initialize the internal field
           dataSourceTable: 'strutture',
-          pageLength: 10,
+          pageLength: 2000,
           showHeader: true,
           fixedColumnsCount: 1,
           selectable: true,

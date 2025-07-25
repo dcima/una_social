@@ -1,6 +1,4 @@
 // lib/main.dart
-// ignore_for_file: avoid_print, deprecated_member_use
-
 import 'dart:async';
 
 import 'package:flutter_web_plugins/url_strategy.dart';
@@ -11,102 +9,99 @@ import 'package:una_social/app_router.dart';
 import 'package:una_social/controllers/auth_controller.dart';
 import 'package:una_social/controllers/esterni_controller.dart';
 import 'package:una_social/controllers/personale_controller.dart';
-import 'package:una_social/controllers/profile_controller.dart'; // <-- 1. IMPORTA IL NUOVO CONTROLLER
+import 'package:una_social/controllers/profile_controller.dart';
 import 'package:una_social/helpers/logger_helper.dart';
 
 const String supabaseUrlEnvKey = 'SUPABASE_URL';
 const String supabaseAnonKeyEnvKey = 'SUPABASE_ANON_KEY';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  setUrlStrategy(PathUrlStrategy());
+  // --- MODIFICA CHIAVE: USARE runZonedGuarded ---
+  // Questo crea una "zona" protetta per l'app. Il secondo parametro è un
+  // gestore di errori globale che cattura tutte le eccezioni non gestite
+  // all'interno della zona, inclusa quella proveniente dal nostro stream.
+  await runZonedGuarded<Future<void>>(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      setUrlStrategy(PathUrlStrategy());
 
-  logInfo("App avviata. Tentativo di inizializzazione Supabase...");
+      logInfo("App avviata. Tentativo di inizializzazione Supabase...");
 
-  const String supabaseUrl = String.fromEnvironment(supabaseUrlEnvKey, defaultValue: '');
-  const String supabaseAnonKey = String.fromEnvironment(supabaseAnonKeyEnvKey, defaultValue: '');
+      const String supabaseUrl = String.fromEnvironment(supabaseUrlEnvKey, defaultValue: '');
+      const String supabaseAnonKey = String.fromEnvironment(supabaseAnonKeyEnvKey, defaultValue: '');
 
-  if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
-    String errorMessage = "ERRORE CRITICO: Le variabili d'ambiente Supabase non sono definite.";
-    logError(errorMessage);
-    runApp(SupabaseErrorApp(error: errorMessage));
-    return;
-  }
+      if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
+        String errorMessage = "ERRORE CRITICO: Le variabili d'ambiente Supabase non sono definite.";
+        logError(errorMessage);
+        runApp(SupabaseErrorApp(error: errorMessage));
+        return;
+      }
 
-  logInfo("Supabase URL (da --dart-define): $supabaseUrl");
+      await Supabase.initialize(
+        url: supabaseUrl,
+        anonKey: supabaseAnonKey,
+        authOptions: const FlutterAuthClientOptions(
+          authFlowType: AuthFlowType.pkce,
+        ),
+        debug: true,
+      );
 
-  try {
-    await Supabase.initialize(
-      url: supabaseUrl,
-      anonKey: supabaseAnonKey,
-      authOptions: const FlutterAuthClientOptions(
-        authFlowType: AuthFlowType.pkce,
-      ),
-      debug: true,
-    );
-    logInfo("Client Supabase inizializzato. In attesa di uno stato di autenticazione stabile...");
+      logInfo("Client Supabase inizializzato. Avvio del monitoraggio dell'autenticazione...");
 
-    // --- CANCELLO DI SINCRONIZZAZIONE ROBUSTO ---
-    final authCompleter = Completer<void>();
-    StreamSubscription? subscription;
-    subscription = Supabase.instance.client.auth.onAuthStateChange.listen(
-      (data) {
-        final event = data.event;
-        if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.tokenRefreshed || event == AuthChangeEvent.passwordRecovery) {
-          logInfo("Stato di autenticazione PRONTO ($event). Sblocco dell'app.");
-          if (!authCompleter.isCompleted) {
-            authCompleter.complete();
-            subscription?.cancel();
+      // Questo listener rimane attivo e gestisce i cambiamenti di stato
+      Supabase.instance.client.auth.onAuthStateChange.listen(
+        (data) {
+          final event = data.event;
+          logInfo("Evento Auth ricevuto in tempo reale: $event");
+          if (event == AuthChangeEvent.signedOut) {
+            logInfo("Sessione terminata. L'UI (gestita da AppRouter/AuthController) dovrebbe ora mostrare la schermata di login.");
           }
-        } else if (event == AuthChangeEvent.initialSession && data.session == null) {
-          logInfo("Stato di autenticazione PRONTO (Nessun utente). Sblocco dell'app.");
-          if (!authCompleter.isCompleted) {
-            authCompleter.complete();
-            subscription?.cancel();
+        },
+        // Il blocco onError viene ancora eseguito come prima
+        onError: (error) {
+          logError("ERRORE NEL FLUSSO DI AUTENTICAZIONE IN TEMPO REALE: $error");
+          if (error is AuthApiException && (error.message.contains('Invalid Refresh Token') || error.statusCode == '400')) {
+            logError("Refresh token non valido rilevato. La sessione locale è corrotta o è scaduta sul server. Eseguo il logout forzato per pulirla.");
+            Supabase.instance.client.auth.signOut();
           }
-        }
-      },
-      onError: (error) {
-        logError("Errore critico nel flusso di autenticazione: $error");
-        if (!authCompleter.isCompleted) {
-          authCompleter.completeError(error);
-          subscription?.cancel();
-        }
-      },
-    );
+        },
+      );
 
-    await authCompleter.future;
-    logInfo("Sincronizzazione autenticazione completata. Inizializzo i controller.");
+      // Aspettiamo solo lo stato iniziale per avviare l'UI
+      await Supabase.instance.client.auth.onAuthStateChange.first;
+      logInfo("Sincronizzazione autenticazione iniziale completata. Inizializzo i controller.");
 
-    Get.put(AuthController(), permanent: true);
-    Get.put(PersonaleController(), permanent: true);
-    Get.put(EsterniController(), permanent: true);
-    Get.put(ProfileController(), permanent: true); // <-- 2. INIETTA IL NUOVO CONTROLLER
-    logInfo("[Main] Tutti i controller sono stati inizializzati.");
-  } on AuthApiException catch (e) {
-    // ERRORE SPECIFICO: La sessione salvata nel browser non è valida.
-    print('>>> Errore di autenticazione durante l' 'init: ${e.message}');
-    print('>>> La sessione salvata è corrotta o non valida. Eseguo il logout forzato per pulirla.');
+      Get.put(AuthController(), permanent: true);
+      Get.put(PersonaleController(), permanent: true);
+      Get.put(EsterniController(), permanent: true);
+      Get.put(ProfileController(), permanent: true);
+      logInfo("[Main] Tutti i controller sono stati inizializzati.");
 
-    // AZIONE CORRETTIVA: Esegui un logout. Questo pulirà la sessione
-    // invalida dal localStorage del browser.
-    await Supabase.instance.client.auth.signOut();
-  } catch (e, stackTrace) {
-    logError("ERRORE CRITICO durante l'inizializzazione:", e, stackTrace);
-    runApp(SupabaseErrorApp(error: "Errore inizializzazione Supabase: ${e.toString()}"));
-    return;
-  }
-
-  logInfo("Avvio dell'interfaccia utente (MyApp)...");
-  runApp(const MyApp());
+      logInfo("Avvio dell'interfaccia utente (MyApp)...");
+      runApp(const MyApp());
+    },
+    // --- GESTORE GLOBALE DEGLI ERRORI ---
+    (error, stack) {
+      // Qui intercettiamo l'errore prima che venga mostrato come "non gestito".
+      // Possiamo decidere di loggarlo in modo meno aggressivo.
+      if (error is AuthApiException) {
+        // Riconosciamo questo errore come "gestito" dalla nostra logica di sign-out.
+        // Lo logghiamo come INFO invece che come SEVERE per non spaventare.
+        logInfo("AuthApiException gestita a livello globale: ${error.message}");
+      } else {
+        // Per tutti gli altri errori imprevisti, li logghiamo come critici.
+        logError("ERRORE NON GESTITO A LIVELLO GLOBALE:", error, stack);
+      }
+    },
+  );
 }
 
+// ... (il resto del file MyApp e SupabaseErrorApp rimane invariato) ...
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Nessuna modifica necessaria qui. GetMaterialApp.router è corretto.
     return GetMaterialApp.router(
       title: 'Una Social',
       theme: ThemeData(
@@ -133,7 +128,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// Nessuna modifica necessaria a SupabaseErrorApp
 class SupabaseErrorApp extends StatelessWidget {
   final String error;
   const SupabaseErrorApp({super.key, required this.error});

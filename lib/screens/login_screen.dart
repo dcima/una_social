@@ -12,7 +12,8 @@ import 'package:una_social/helpers/snackbar_helper.dart';
 final supabase = Supabase.instance.client;
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String? lastEmail;
+  const LoginScreen({super.key, this.lastEmail});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
