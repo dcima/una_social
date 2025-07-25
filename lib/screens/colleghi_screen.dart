@@ -1,11 +1,13 @@
 // lib/screens/colleghi_screen.dart
 
-// ignore_for_file: avoid_print
+// ignore_for_file: avoid_print, null_check_on_nullable_type_parameter
 
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:syncfusion_flutter_datagrid/datagrid.dart'; // Aggiunto import per SfDataGrid
+import 'package:collection/collection.dart'; // Per firstWhereOrNull
 
 // --- MODELLI (INVARIATI) ---
 enum RoleType { all, docente, tecnico }
@@ -92,7 +94,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   bool _isFilterVisible = false;
 
   bool _selectAll = false;
-  int _rowsPerPage = 10;
+  int _rowsPerPage = 100;
   int _sortColumnIndex = 1;
   bool _sortAscending = true;
 
@@ -147,7 +149,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       final userStrutturaId = personaleUtenteCorrente['struttura'] as int;
 
       final stopwatchStrutture = Stopwatch()..start();
-      final struttureData = await _supabase.from('strutture').select('ente, id, nome, indirizzo').eq('ente', userEnte).order('nome', ascending: true);
+      final struttureData = await _supabase.from('strutture').select('ente, id, nome, indirizzo').eq('ente', userEnte).order('id', ascending: true).limit(2000);
       stopwatchStrutture.stop();
       print('ColleghiScreen: Caricamento strutture: ${stopwatchStrutture.elapsedMilliseconds} ms. Numero strutture: ${struttureData.length}');
 
@@ -281,6 +283,8 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   }
 
   Widget _buildMainContent() {
+    print('ColleghiScreen: build');
+
     return Column(
       children: [
         _buildCustomSearchableDropdown<Struttura>(
@@ -309,53 +313,60 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
             });
           },
         ),
+        // Moved the header content (title, filter icon, search bar) outside of PaginatedDataTable's header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Elenco Colleghi', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: Icon(_isFilterVisible ? Icons.filter_list_off : Icons.filter_list),
+                    tooltip: 'Filtra elenco',
+                    onPressed: () {
+                      setState(() {
+                        _isFilterVisible = !_isFilterVisible;
+                        if (!_isFilterVisible) _searchController.clear();
+                      });
+                    },
+                  ),
+                ],
+              ),
+              if (_isFilterVisible)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Cerca per nome, cognome o email...',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () => _searchController.clear(),
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
         Expanded(
           child: SingleChildScrollView(
             child: PaginatedDataTable(
-              header: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Elenco Colleghi'),
-                      IconButton(
-                        icon: Icon(_isFilterVisible ? Icons.filter_list_off : Icons.filter_list),
-                        tooltip: 'Filtra elenco',
-                        onPressed: () {
-                          setState(() {
-                            _isFilterVisible = !_isFilterVisible;
-                            if (!_isFilterVisible) _searchController.clear();
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                  if (_isFilterVisible)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: 'Cerca per nome, cognome o email...',
-                          prefixIcon: const Icon(Icons.search, size: 20),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear, size: 20),
-                                  onPressed: () => _searchController.clear(),
-                                )
-                              : null,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              rowsPerPage: _rowsPerPage,
+              // The 'header' property is removed or simplified here, as its content is now outside
+              availableRowsPerPage: [10, 20, 50, 100, 500, 1000, 2000],
+              headingRowHeight: 64,
               onRowsPerPageChanged: (value) => setState(() => _rowsPerPage = value ?? 10),
-              sortColumnIndex: _sortColumnIndex,
+              rowsPerPage: _rowsPerPage,
               sortAscending: _sortAscending,
+              sortColumnIndex: _sortColumnIndex,
               columns: [
                 DataColumn(
                   label: Checkbox(
@@ -373,7 +384,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
                 ),
                 DataColumn(label: const Text('Cognome'), onSort: _onSort),
                 DataColumn(label: const Text('Nome'), onSort: _onSort),
-                DataColumn(label: const Text('Email')),
+                DataColumn(label: const Text('Email'), onSort: _onSort),
               ],
               source: _ColleghiDataSource(
                 colleghi: _filteredColleghi,
@@ -408,22 +419,10 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
               allItems: allItems,
               selectedValue: selectedValue,
               initialSearchQuery: initialSearchQuery,
+              onLaunchMaps: _launchMaps, // Passa la funzione _launchMaps
               itemBuilder: (item, isSelected, key) {
-                if (item is Struttura) {
-                  return Card(
-                    key: key,
-                    color: isSelected ? Theme.of(context).primaryColorLight.withAlpha(128) : null,
-                    child: ListTile(
-                      title: Text(item.nome, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(item.indirizzo ?? 'N/D'),
-                      trailing: IconButton(
-                        icon: Icon(Icons.location_on_outlined, color: Colors.blue.shade700),
-                        onPressed: () => _launchMaps(item.indirizzo),
-                      ),
-                      onTap: () => Navigator.of(context).pop(item),
-                    ),
-                  );
-                }
+                // Questo itemBuilder è ora usato solo per i ruoli (String),
+                // la logica per Struttura è gestita internamente da _SearchDialog con SfDataGrid.
                 return ListTile(
                   key: key,
                   title: Text(displayValue(item)),
@@ -464,14 +463,15 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   }
 }
 
-// --- WIDGET DIALOGO PERSONALIZZATO (MODIFICATO) ---
+// --- WIDGET DIALOGO PERSONALIZZATO (MODIFICATO PER USARE SfDataGrid) ---
 class _SearchDialog<T> extends StatefulWidget {
   final String label;
   final List<T> allItems;
   final T? selectedValue;
   final String initialSearchQuery;
-  final Widget Function(T item, bool isSelected, Key? key) itemBuilder;
+  final Widget Function(T item, bool isSelected, Key? key) itemBuilder; // Usato solo se T non è Struttura
   final bool Function(T item, String query) filterFn;
+  final Function(String?) onLaunchMaps; // Nuova callback per Google Maps
 
   const _SearchDialog({
     super.key,
@@ -481,6 +481,7 @@ class _SearchDialog<T> extends StatefulWidget {
     this.initialSearchQuery = '',
     required this.itemBuilder,
     required this.filterFn,
+    required this.onLaunchMaps, // Richiesto
   });
 
   @override
@@ -489,7 +490,8 @@ class _SearchDialog<T> extends StatefulWidget {
 
 class _SearchDialogState<T> extends State<_SearchDialog<T>> {
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  final DataGridController _dataGridController = DataGridController(); // Controller per SfDataGrid
+  late DataGridSource _dataSource; // Data source generico
   List<T> _filteredItems = [];
   Timer? _debounce;
 
@@ -502,16 +504,28 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
     _searchController.text = widget.initialSearchQuery;
     _searchController.addListener(_onSearchChanged);
 
-    // Applica subito il filtro iniziale
-    final stopwatchFilter = Stopwatch()..start();
-    _filterItems();
-    stopwatchFilter.stop();
-    print('_SearchDialog: Tempo filtro iniziale: ${stopwatchFilter.elapsedMilliseconds} ms. Elementi filtrati: ${_filteredItems.length}');
+    _filterItems(); // Popola _filteredItems
+
+    // Inizializza il dataSource in base al tipo T
+    if (T == Struttura) {
+      _dataSource = _StrutturaSearchDataSource(
+        _filteredItems.cast<Struttura>(),
+        widget.selectedValue as Struttura?,
+        (s1, s2) => s1.id == s2.id, // Usa l'uguaglianza di Struttura
+        widget.onLaunchMaps, // Passa la callback
+      );
+    } else {
+      // Fallback per altri tipi (es. String per i ruoli)
+      _dataSource = _GenericSearchDataSource(
+        _filteredItems,
+        widget.selectedValue,
+        widget.itemBuilder,
+      );
+    }
 
     // Scorrimento iniziale dopo che il layout è stabile
     WidgetsBinding.instance.addPostFrameCallback((_) {
       print('_SearchDialog: addPostFrameCallback eseguito. Scheduling scroll.');
-      // Aggiungo un piccolo ritardo per permettere al ListView di stabilizzarsi
       Future.delayed(const Duration(milliseconds: 100), () {
         _scrollToSelectedItem();
       });
@@ -526,7 +540,7 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
     _debounce?.cancel();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
-    _scrollController.dispose();
+    _dataGridController.dispose();
     super.dispose();
   }
 
@@ -535,12 +549,18 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
     _debounce = Timer(const Duration(milliseconds: 300), () {
       print('_SearchDialog: Ricerca cambiata: "${_searchController.text}"');
       final stopwatchFilter = Stopwatch()..start();
-      _filterItems();
+      _filterItems(); // Aggiorna _filteredItems
+
+      if (T == Struttura) {
+        (_dataSource as _StrutturaSearchDataSource).updateData(_filteredItems.cast<Struttura>());
+      } else {
+        (_dataSource as _GenericSearchDataSource).updateData(_filteredItems);
+      }
+
       stopwatchFilter.stop();
       print('_SearchDialog: Tempo filtro onSearchChanged: ${stopwatchFilter.elapsedMilliseconds} ms. Elementi filtrati: ${_filteredItems.length}');
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Aggiungo un piccolo ritardo anche qui per la stabilità dopo il filtro
         Future.delayed(const Duration(milliseconds: 100), () {
           _scrollToSelectedItem();
         });
@@ -558,31 +578,69 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
   }
 
   void _scrollToSelectedItem() {
-    if (widget.selectedValue == null || !_scrollController.hasClients) return;
+    if (widget.selectedValue == null || !_filteredItems.contains(widget.selectedValue)) return;
 
-    final int selectedIndex = widget.selectedValue != null ? _filteredItems.indexOf(widget.selectedValue as T) : -1;
+    final int selectedIndex = _filteredItems.indexOf(widget.selectedValue!);
     if (selectedIndex != -1) {
-      const double avgItemHeight = 72.0;
-
-      final double viewportHeight = _scrollController.position.viewportDimension;
-      final double maxScrollExtent = _scrollController.position.maxScrollExtent;
-
-      double targetOffset = (selectedIndex * avgItemHeight) - (viewportHeight / 2) + (avgItemHeight / 2);
-
-      targetOffset = targetOffset.clamp(0.0, maxScrollExtent);
-
-      final stopwatchScroll = Stopwatch()..start();
-      _scrollController.jumpTo(targetOffset);
-      stopwatchScroll.stop();
-      print('_SearchDialog: Scorrimento a indice $selectedIndex. Tempo jumpTo: ${stopwatchScroll.elapsedMilliseconds} ms');
+      _dataGridController.scrollToRow(selectedIndex.toDouble());
+      print('_SearchDialog: Scorrimento a indice $selectedIndex.');
     } else {
       print('_SearchDialog: Elemento selezionato non trovato nella lista filtrata per scorrimento.');
     }
   }
 
+  List<GridColumn> _buildGridColumnsForStruttura() {
+    return [
+      GridColumn(
+        columnName: 'id',
+        width: 60, // Larghezza fissa per l'ID
+        label: Container(
+          padding: const EdgeInsets.all(8.0),
+          alignment: Alignment.centerLeft,
+          child: const Text('ID', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ),
+      GridColumn(
+        columnName: 'ente',
+        width: 100, // Larghezza fissa per l'ente
+        label: Container(
+          padding: const EdgeInsets.all(8.0),
+          alignment: Alignment.centerLeft,
+          child: const Text('Ente', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ),
+      GridColumn(
+        columnName: 'nome',
+        label: Container(
+          padding: const EdgeInsets.all(8.0),
+          alignment: Alignment.centerLeft,
+          child: const Text('Nome', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ),
+      GridColumn(
+        columnName: 'indirizzo',
+        label: Container(
+          padding: const EdgeInsets.all(8.0),
+          alignment: Alignment.centerLeft,
+          child: const Text('Indirizzo', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ),
+      GridColumn(
+        columnName: 'mappa',
+        width: 60, // Larghezza fissa per il pulsante
+        label: Container(
+          padding: const EdgeInsets.all(8.0),
+          alignment: Alignment.center,
+          child: const Text('Mappa', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     print('_SearchDialog: Build avviato per "${widget.label}"');
+
     return AlertDialog(
       title: Text('Seleziona ${widget.label}'),
       content: SizedBox(
@@ -592,7 +650,7 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
           children: [
             TextField(
               controller: _searchController,
-              autofocus: true,
+              // Rimosso autofocus: true per permettere alla griglia di ricevere il focus
               decoration: InputDecoration(
                 hintText: 'Cerca...',
                 prefixIcon: const Icon(Icons.search),
@@ -606,22 +664,42 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
             Expanded(
               child: _filteredItems.isEmpty
                   ? const Center(child: Text('Nessun risultato'))
-                  : ListView.builder(
-                      controller: _scrollController,
-                      itemCount: _filteredItems.length,
-                      itemBuilder: (context, index) {
-                        final item = _filteredItems[index];
-                        final isSelected = (item == widget.selectedValue);
-
-                        Key? itemKey;
-                        if (item is Struttura) {
-                          itemKey = ValueKey(item.id);
-                        } else {
-                          itemKey = ValueKey(item);
-                        }
-                        return widget.itemBuilder(item, isSelected, itemKey);
-                      },
-                    ),
+                  : (T == Struttura
+                      ? SfDataGrid(
+                          controller: _dataGridController,
+                          source: _dataSource,
+                          columns: _buildGridColumnsForStruttura(),
+                          selectionMode: SelectionMode.single, // Solo selezione singola per un dropdown
+                          headerGridLinesVisibility: GridLinesVisibility.both,
+                          gridLinesVisibility: GridLinesVisibility.both,
+                          columnWidthMode: ColumnWidthMode.fill,
+                          frozenColumnsCount: 1, // La prima colonna (ID) è fissa
+                          navigationMode: GridNavigationMode.cell, // Abilita la navigazione cella per cella con tastiera
+                          onCellTap: (DataGridCellTapDetails details) {
+                            if (details.rowColumnIndex.rowIndex > 0) {
+                              // Escludi la riga dell'header
+                              final int dataRowIndex = details.rowColumnIndex.rowIndex - 1;
+                              if (dataRowIndex >= 0 && dataRowIndex < _filteredItems.length) {
+                                final Struttura selectedStruttura = _filteredItems[dataRowIndex] as Struttura;
+                                // Se la cella tappata è l'icona della mappa, lancia la mappa, altrimenti esci con la selezione
+                                if (details.column.columnName == 'mappa') {
+                                  widget.onLaunchMaps(selectedStruttura.indirizzo);
+                                } else {
+                                  Navigator.of(context).pop(selectedStruttura);
+                                }
+                              }
+                            }
+                          },
+                        )
+                      : ListView.builder(
+                          // Fallback per altri tipi (es. String per i ruoli)
+                          itemCount: _filteredItems.length,
+                          itemBuilder: (context, index) {
+                            final item = _filteredItems[index];
+                            final isSelected = (item == widget.selectedValue);
+                            return widget.itemBuilder(item, isSelected, ValueKey(item.hashCode));
+                          },
+                        )),
             ),
           ],
         ),
@@ -636,7 +714,131 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
   }
 }
 
-// --- DATASOURCE (INVARIATO) ---
+// --- Custom DataGridSource per oggetti Struttura in _SearchDialog ---
+class _StrutturaSearchDataSource extends DataGridSource {
+  List<Struttura> _structures;
+  final Struttura? _selectedValue;
+  final bool Function(Struttura s1, Struttura s2) _areStructuresEqualCallback;
+  final Function(String?) _onLaunchMaps;
+  List<DataGridRow> _dataGridRows = [];
+
+  _StrutturaSearchDataSource(
+    this._structures,
+    this._selectedValue,
+    this._areStructuresEqualCallback,
+    this._onLaunchMaps,
+  ) {
+    _buildDataGridRows();
+  }
+
+  void _buildDataGridRows() {
+    _dataGridRows = _structures.map<DataGridRow>((s) {
+      return DataGridRow(cells: [
+        DataGridCell<int>(columnName: 'id', value: s.id), // Aggiunto ID
+        DataGridCell<String>(columnName: 'ente', value: s.ente), // Aggiunto Ente
+        DataGridCell<String>(columnName: 'nome', value: s.nome),
+        DataGridCell<String>(columnName: 'indirizzo', value: s.indirizzo),
+        DataGridCell<Struttura>(columnName: 'mappa', value: s), // Passa l'oggetto completo per il pulsante
+      ]);
+    }).toList();
+  }
+
+  @override
+  List<DataGridRow> get rows => _dataGridRows;
+
+  @override
+  DataGridRowAdapter buildRow(DataGridRow row) {
+    // Trova l'oggetto Struttura originale dalla cella 'mappa'
+    final Struttura? originalStruttura = row.getCells().firstWhereOrNull((cell) => cell.columnName == 'mappa')?.value as Struttura?;
+
+    final bool isSelected = originalStruttura != null && _selectedValue != null && _areStructuresEqualCallback(originalStruttura, _selectedValue);
+
+    // DEBUGGING: Stampa lo stato di selezione per ogni riga
+    print('Struttura ID: ${originalStruttura?.id}, Nome: ${originalStruttura?.nome}, isSelected: $isSelected');
+
+    Color? rowColor;
+    if (isSelected) {
+      final BuildContext? currentContext = NavigationService.navigatorKey.currentContext;
+      if (currentContext != null) {
+        // Ripristinato il colore di evidenziazione del tema
+        rowColor = Colors.amber[300]; // Theme.of(currentContext).highlightColor.withAlpha((0.3 * 255).round());
+      } else {
+        print("Warning: NavigationService.navigatorKey.currentContext is null in _StrutturaSearchDataSource.buildRow. Cannot apply theme highlight.");
+        rowColor = Colors.amber[300];
+      }
+    }
+
+    return DataGridRowAdapter(
+      color: rowColor,
+      cells: row.getCells().map<Widget>((dataGridCell) {
+        if (dataGridCell.columnName == 'mappa') {
+          final Struttura s = dataGridCell.value as Struttura;
+          return IconButton(
+            icon: Icon(Icons.location_on_outlined, color: Colors.blue.shade700),
+            onPressed: () => _onLaunchMaps(s.indirizzo),
+          );
+        }
+        return Container(
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.all(8.0),
+          child: Text(dataGridCell.value?.toString() ?? '', overflow: TextOverflow.ellipsis),
+        );
+      }).toList(),
+    );
+  }
+
+  void updateData(List<Struttura> newStructures) {
+    _structures = newStructures;
+    _buildDataGridRows();
+    notifyListeners();
+  }
+}
+
+// --- Custom DataGridSource per tipi generici (fallback per ruoli) ---
+class _GenericSearchDataSource<T> extends DataGridSource {
+  List<T> _items;
+  final T? _selectedValue;
+  final Widget Function(T item, bool isSelected, Key? key) _itemBuilder;
+  List<DataGridRow> _dataGridRows = [];
+
+  _GenericSearchDataSource(
+    this._items,
+    this._selectedValue,
+    this._itemBuilder,
+  ) {
+    _buildDataGridRows();
+  }
+
+  void _buildDataGridRows() {
+    _dataGridRows = _items.map<DataGridRow>((item) {
+      return DataGridRow(cells: [
+        DataGridCell<T>(columnName: 'item', value: item), // Contiene l'intero oggetto
+      ]);
+    }).toList();
+  }
+
+  @override
+  List<DataGridRow> get rows => _dataGridRows;
+
+  @override
+  DataGridRowAdapter buildRow(DataGridRow row) {
+    final T item = row.getCells()[0].value as T;
+    final bool isSelected = (item == _selectedValue);
+    return DataGridRowAdapter(
+      cells: [
+        _itemBuilder(item, isSelected, ValueKey(item.hashCode)), // Riutilizza l'itemBuilder originale
+      ],
+    );
+  }
+
+  void updateData(List<T> newItems) {
+    _items = newItems;
+    _buildDataGridRows();
+    notifyListeners();
+  }
+}
+
+// --- DATASOURCE (CORRETTO) ---
 class _ColleghiDataSource extends DataTableSource {
   final List<Collega> colleghi;
   final int? currentUserId;
@@ -648,12 +850,18 @@ class _ColleghiDataSource extends DataTableSource {
   DataRow getRow(int index) {
     final collega = colleghi[index];
     final isCurrentUser = collega.id == currentUserId;
+
     return DataRow.byIndex(
       index: index,
       selected: collega.isSelected,
       onSelectChanged: isCurrentUser ? null : (isSelected) => onSelect(collega),
       cells: [
-        DataCell(Checkbox(value: collega.isSelected, onChanged: isCurrentUser ? null : (v) => onSelect(collega))),
+        DataCell(
+          Checkbox(
+            value: collega.isSelected,
+            onChanged: isCurrentUser ? null : (v) => onSelect(collega),
+          ),
+        ),
         DataCell(Text(collega.cognome)),
         DataCell(Text(collega.nome)),
         DataCell(Text(collega.email)),
@@ -667,4 +875,10 @@ class _ColleghiDataSource extends DataTableSource {
   int get rowCount => colleghi.length;
   @override
   int get selectedRowCount => colleghi.where((c) => c.isSelected).length;
+}
+
+// Assicurati che NavigationService sia definito nel tuo progetto,
+// ad esempio in un file separato o qui se è un singleton semplice.
+class NavigationService {
+  static GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 }
