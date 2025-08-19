@@ -9,16 +9,18 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart'; // Aggiunto import per SfDataGrid
 import 'package:collection/collection.dart'; // Per firstWhereOrNull
 
-// --- MODELLI (INVARIATI) ---
+// --- MODELLI ---
 enum RoleType { all, docente, tecnico }
 
 class Collega {
   final String ente;
-  final int id;
+  final String id;
   final String nome;
   final String cognome;
   final String email;
   final List<String> ruoli;
+  final String? photoUrl;
+  final List<String> telefoni; // Aggiunto campo telefoni
   bool isSelected;
 
   Collega({
@@ -28,18 +30,25 @@ class Collega {
     required this.cognome,
     required this.email,
     required this.ruoli,
+    this.photoUrl,
+    this.telefoni = const [], // Inizializza con lista vuota di default
     this.isSelected = false,
   });
 
   factory Collega.fromJson(Map<String, dynamic> json) {
     List<String> ruoliList = (json['ruoli'] as List? ?? []).map((item) => item.toString()).toList();
+    // Gestione del campo telefoni, che può essere un array JSON o null
+    List<String> telefoniList = (json['telefoni'] as List? ?? []).map((item) => item.toString()).toList();
+
     return Collega(
       ente: json['ente'] as String,
-      id: json['id'] as int,
+      id: json['id'].toString(), // Ensure id is always String
       nome: json['nome'] as String? ?? '',
       cognome: json['cognome'] as String? ?? '',
       email: json['email_principale'] as String? ?? '',
       ruoli: ruoliList,
+      photoUrl: json['photo_url'] as String?,
+      telefoni: telefoniList, // Assegna i telefoni parsati
     );
   }
 }
@@ -81,21 +90,28 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
 
   List<Struttura> _strutture = [];
   Struttura? _strutturaSelezionata;
-  List<Collega> _allColleaguesForStructure = [];
-  List<Collega> _filteredColleghi = [];
+  List<Collega> _allColleaguesForStructure = []; // Colleagues for the currently selected structure
+  List<Collega> _filteredColleghi = []; // Colleagues filtered by local search/role/etc. or global search results
   Future<void>? _dataLoadingFuture;
-  int? _currentUserId;
+  String? _currentUserId;
 
   RoleType _selectedRoleType = RoleType.all;
   String? _selectedRole;
 
-  final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
-  bool _isFilterVisible = false;
+  final TextEditingController _searchController = TextEditingController(); // For local filter within structure
+  String _searchQuery = ''; // For local filter
+  bool _isFilterVisible = false; // Controls visibility of local filter
+
+  final TextEditingController _globalSearchController = TextEditingController(); // For global search across personnel and externals
+  String _globalSearchQuery = ''; // For global search
+  List<Collega> _globalSearchResults = []; // Results from global search RPC
+  bool _isGlobalSearchActive = false; // True if global search query is not empty and >= 3 chars
+  Timer? _globalSearchDebounce; // Debounce timer for global search
 
   bool _selectAll = false;
   int _rowsPerPage = 100;
-  int _sortColumnIndex = 1;
+  // Adjusted for new columns: Checkbox(0), Foto(1), Ente(2), ID(3), Cognome(4), Nome(5), Email(6), Telefoni(7)
+  int _sortColumnIndex = 4; // Default sort by Cognome
   bool _sortAscending = true;
 
   Future<void> _launchMaps(String? address) async {
@@ -116,6 +132,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     super.initState();
     print('ColleghiScreen: Inizio initState');
     _dataLoadingFuture = _initializeData();
+
     _searchController.addListener(() {
       if (_searchController.text != _searchQuery) {
         setState(() {
@@ -124,13 +141,67 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
         });
       }
     });
+
+    _globalSearchController.addListener(_onGlobalSearchChanged);
+
     print('ColleghiScreen: Fine initState');
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _globalSearchController.dispose();
+    _globalSearchDebounce?.cancel();
     super.dispose();
+  }
+
+  void _onGlobalSearchChanged() {
+    if (_globalSearchDebounce?.isActive ?? false) _globalSearchDebounce!.cancel();
+    _globalSearchDebounce = Timer(const Duration(milliseconds: 500), () async {
+      final query = _globalSearchController.text.trim();
+      setState(() {
+        _globalSearchQuery = query;
+        // _isGlobalSearchActive becomes true only if query is not empty and >= 3 chars
+        _isGlobalSearchActive = query.isNotEmpty && query.length >= 3;
+        // When global search is active or cleared, hide local filter and clear its text
+        if (_isGlobalSearchActive || query.isEmpty) {
+          _isFilterVisible = false;
+          _searchController.clear();
+        }
+      });
+
+      if (_isGlobalSearchActive) {
+        await _performGlobalSearch(query);
+      } else {
+        // If global search is cleared or not active (e.g., < 3 chars), revert to structure/local filters
+        _applyFilters();
+      }
+    });
+  }
+
+  Future<void> _performGlobalSearch(String query) async {
+    print('ColleghiScreen: Performing global search for: "$query"');
+    try {
+      final stopwatchGlobalSearch = Stopwatch()..start();
+      final response = await _supabase.rpc('search_personnel_and_externals', params: {'p_query': query});
+      stopwatchGlobalSearch.stop();
+      print('ColleghiScreen: Global search completed in ${stopwatchGlobalSearch.elapsedMilliseconds} ms. Results: ${(response as List).length}');
+
+      setState(() {
+        _globalSearchResults = response.map((json) => Collega.fromJson(json)).toList();
+        _applyFilters(); // Apply sort/pagination on global results
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Errore durante la ricerca globale: $e')),
+        );
+      }
+      setState(() {
+        _globalSearchResults = []; // Clear results on error
+        _applyFilters();
+      });
+    }
   }
 
   Future<void> _initializeData() async {
@@ -144,7 +215,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       stopwatchPersonale.stop();
       print('ColleghiScreen: Caricamento personale utente: ${stopwatchPersonale.elapsedMilliseconds} ms');
 
-      _currentUserId = personaleUtenteCorrente['id'] as int;
+      _currentUserId = (personaleUtenteCorrente['id'] as int).toString();
       final userEnte = personaleUtenteCorrente['ente'] as String;
       final userStrutturaId = personaleUtenteCorrente['struttura'] as int;
 
@@ -175,6 +246,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     print('ColleghiScreen: Inizio _fetchColleagues per ${struttura.nome}');
     try {
       final stopwatchColleagues = Stopwatch()..start();
+      // Assumiamo che 'get_colleagues_by_struttura' recuperi tutti i campi necessari per Collega
       final response = await _supabase.rpc('get_colleagues_by_struttura', params: {'p_ente': struttura.ente, 'p_struttura_id': struttura.id});
       stopwatchColleagues.stop();
       print('ColleghiScreen: Caricamento colleghi per struttura: ${stopwatchColleagues.elapsedMilliseconds} ms. Numero colleghi: ${(response as List).length}');
@@ -195,8 +267,10 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   void _resetFiltersAndApply() {
     _selectedRoleType = RoleType.all;
     _selectedRole = null;
-    _searchController.clear();
-    _applyFilters();
+    _searchController.clear(); // Clear local search input
+    _globalSearchController.clear(); // Clear global search input, which will trigger _onGlobalSearchChanged and reset _isGlobalSearchActive
+    // _isGlobalSearchActive will be set to false by _onGlobalSearchChanged when _globalSearchController is cleared.
+    _applyFilters(); // Reapply filters based on the reset state
   }
 
   bool _isTecnico(Collega c) => c.ruoli.any((r) => r.toLowerCase().startsWith('area'));
@@ -204,19 +278,27 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
 
   void _applyFilters() {
     print('ColleghiScreen: Applicazione filtri...');
+    print('ColleghiScreen: _isGlobalSearchActive: $_isGlobalSearchActive'); // Debugging print
     setState(() {
-      List<Collega> tempFilteredList = List.from(_allColleaguesForStructure);
-      if (_selectedRoleType == RoleType.docente) tempFilteredList.retainWhere(_isDocente);
-      if (_selectedRoleType == RoleType.tecnico) tempFilteredList.retainWhere(_isTecnico);
-      if (_selectedRole != null) tempFilteredList.retainWhere((c) => c.ruoli.contains(_selectedRole!));
+      List<Collega> tempFilteredList;
 
-      if (_searchQuery.isNotEmpty) {
-        tempFilteredList.retainWhere((collega) {
-          final query = _searchQuery.toLowerCase();
-          final nomeCompleto = '${collega.nome} ${collega.cognome}'.toLowerCase();
-          final email = collega.email.toLowerCase();
-          return nomeCompleto.contains(query) || email.contains(query);
-        });
+      if (_isGlobalSearchActive) {
+        tempFilteredList = List.from(_globalSearchResults);
+      } else {
+        tempFilteredList = List.from(_allColleaguesForStructure);
+        if (_selectedRoleType == RoleType.docente) tempFilteredList.retainWhere(_isDocente);
+        if (_selectedRoleType == RoleType.tecnico) tempFilteredList.retainWhere(_isTecnico);
+        if (_selectedRole != null) tempFilteredList.retainWhere((c) => c.ruoli.contains(_selectedRole!));
+
+        if (_searchQuery.isNotEmpty) {
+          tempFilteredList.retainWhere((collega) {
+            final query = _searchQuery.toLowerCase();
+            final nomeCompleto = '${collega.nome} ${collega.cognome}'.toLowerCase();
+            final email = collega.email.toLowerCase();
+            final telefoniConcatenated = collega.telefoni.join(' ').toLowerCase();
+            return nomeCompleto.contains(query) || email.contains(query) || telefoniConcatenated.contains(query);
+          });
+        }
       }
 
       _filteredColleghi = tempFilteredList;
@@ -227,6 +309,9 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   }
 
   List<String> get _dropdownRoles {
+    if (_isGlobalSearchActive) {
+      return ['Tutti']; // Roles not applicable when global search is active
+    }
     Iterable<Collega> sourceList;
     if (_selectedRoleType == RoleType.docente) {
       sourceList = _allColleaguesForStructure.where(_isDocente);
@@ -243,15 +328,36 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   void _sortFilteredList() {
     _filteredColleghi.sort((a, b) {
       int result;
+      // Column indices (0-based for DataColumn):
+      // Checkbox (0, not sortable)
+      // Foto (1, not sortable)
+      // Ente (2)
+      // ID (3)
+      // Cognome (4)
+      // Nome (5)
+      // Email (6)
+      // Telefoni (7)
       switch (_sortColumnIndex) {
-        case 1: // Cognome
+        case 2: // Ente
+          result = a.ente.compareTo(b.ente);
+          break;
+        case 3: // ID
+          result = a.id.compareTo(b.id);
+          break;
+        case 4: // Cognome
           result = a.cognome.compareTo(b.cognome);
           break;
-        case 2: // Nome
+        case 5: // Nome
           result = a.nome.compareTo(b.nome);
           break;
+        case 6: // Email
+          result = a.email.compareTo(b.email);
+          break;
+        case 7: // Telefoni
+          result = a.telefoni.join(', ').compareTo(b.telefoni.join(', '));
+          break;
         default:
-          result = a.cognome.compareTo(b.cognome);
+          result = a.cognome.compareTo(b.cognome); // Default to cognome if index is out of bounds
       }
       return _sortAscending ? result : -result;
     });
@@ -259,6 +365,9 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
 
   void _onSort(int columnIndex, bool ascending) {
     setState(() {
+      // Adjust column index for non-sortable leading columns (Checkbox, Foto)
+      // If checkbox is 0, Foto is 1, then Ente (visual 2) is sortable index 2.
+      // So, visual index directly maps to _sortColumnIndex if columns are contiguous.
       _sortColumnIndex = columnIndex;
       _sortAscending = ascending;
       _sortFilteredList();
@@ -283,37 +392,64 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   }
 
   Widget _buildMainContent() {
-    print('ColleghiScreen: build');
+    print('ColleghiScreen: build main content');
+
+    // Determine if the structure/role/local search filters should be enabled
+    final bool enableDropdownsAndLocalFilter = !_isGlobalSearchActive;
 
     return Column(
       children: [
-        _buildCustomSearchableDropdown<Struttura>(
-          label: 'Struttura di Appartenenza',
-          selectedValue: _strutturaSelezionata,
-          displayValue: (struttura) => '${struttura.nome} - ${struttura.indirizzo ?? 'N/D'}',
-          allItems: _strutture,
-          initialSearchQuery: _searchQuery,
-          onItemSelected: (newValue) {
-            if (newValue != null && newValue != _strutturaSelezionata) {
-              setState(() => _strutturaSelezionata = newValue);
-              _fetchColleagues(newValue);
-            }
-          },
+        // Global Search Field (new)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: TextField(
+            controller: _globalSearchController,
+            decoration: InputDecoration(
+              hintText: 'Es. Mario Rossi / bianc / mario.rossi@gmail.com / carlo.bianchi@unibo.it / @unibo / @gmail',
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              suffixIcon: _globalSearchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _globalSearchController.clear();
+                      },
+                    )
+                  : null,
+            ),
+          ),
         ),
-        _buildCustomSearchableDropdown<String>(
-          label: 'Ruolo',
-          selectedValue: _selectedRole ?? 'Tutti',
-          displayValue: (role) => role,
-          allItems: _dropdownRoles,
-          initialSearchQuery: '',
-          onItemSelected: (newValue) {
-            setState(() {
-              _selectedRole = (newValue == 'Tutti') ? null : newValue;
-              _applyFilters();
-            });
-          },
-        ),
-        // Moved the header content (title, filter icon, search bar) outside of PaginatedDataTable's header
+        // Existing Structure and Role dropdowns, conditionally rendered
+        if (enableDropdownsAndLocalFilter)
+          _buildCustomSearchableDropdown<Struttura>(
+            label: 'Struttura di Appartenenza',
+            selectedValue: _strutturaSelezionata,
+            displayValue: (struttura) => '${struttura.nome} - ${struttura.indirizzo ?? 'N/D'}',
+            allItems: _strutture,
+            initialSearchQuery: _searchQuery,
+            onItemSelected: (newValue) {
+              if (newValue != null && newValue != _strutturaSelezionata) {
+                setState(() => _strutturaSelezionata = newValue);
+                _fetchColleagues(newValue);
+              }
+            },
+          ),
+        if (enableDropdownsAndLocalFilter)
+          _buildCustomSearchableDropdown<String>(
+            label: 'Ruolo',
+            selectedValue: _selectedRole ?? 'Tutti',
+            displayValue: (role) => role,
+            allItems: _dropdownRoles,
+            initialSearchQuery: '',
+            onItemSelected: (newValue) {
+              setState(() {
+                _selectedRole = (newValue == 'Tutti') ? null : newValue;
+                _applyFilters();
+              });
+            },
+          ),
+        // Local Filter Section (title, filter icon, local search bar), conditionally rendered
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: Column(
@@ -323,19 +459,20 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Elenco Colleghi', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  IconButton(
-                    icon: Icon(_isFilterVisible ? Icons.filter_list_off : Icons.filter_list),
-                    tooltip: 'Filtra elenco',
-                    onPressed: () {
-                      setState(() {
-                        _isFilterVisible = !_isFilterVisible;
-                        if (!_isFilterVisible) _searchController.clear();
-                      });
-                    },
-                  ),
+                  if (enableDropdownsAndLocalFilter) // Local filter icon only if global search is off
+                    IconButton(
+                      icon: Icon(_isFilterVisible ? Icons.filter_list_off : Icons.filter_list),
+                      tooltip: 'Filtra elenco',
+                      onPressed: () {
+                        setState(() {
+                          _isFilterVisible = !_isFilterVisible;
+                          if (!_isFilterVisible) _searchController.clear(); // Clear local search if hiding
+                        });
+                      },
+                    ),
                 ],
               ),
-              if (_isFilterVisible)
+              if (_isFilterVisible && enableDropdownsAndLocalFilter) // Local filter text field only if visible AND global search is off
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: TextField(
@@ -359,8 +496,8 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
         ),
         Expanded(
           child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal, // Enable horizontal scrolling for many columns
             child: PaginatedDataTable(
-              // The 'header' property is removed or simplified here, as its content is now outside
               availableRowsPerPage: [10, 20, 50, 100, 500, 1000, 2000],
               headingRowHeight: 64,
               onRowsPerPageChanged: (value) => setState(() => _rowsPerPage = value ?? 10),
@@ -382,9 +519,13 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
                     },
                   ),
                 ),
+                const DataColumn(label: Text('Foto')),
+                DataColumn(label: const Text('Ente'), onSort: _onSort),
+                DataColumn(label: const Text('ID'), onSort: _onSort),
                 DataColumn(label: const Text('Cognome'), onSort: _onSort),
                 DataColumn(label: const Text('Nome'), onSort: _onSort),
                 DataColumn(label: const Text('Email'), onSort: _onSort),
+                DataColumn(label: const Text('Telefoni'), onSort: _onSort),
               ],
               source: _ColleghiDataSource(
                 colleghi: _filteredColleghi,
@@ -403,8 +544,8 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     required T? selectedValue,
     required String Function(T) displayValue,
     required List<T> allItems,
-    required ValueChanged<T?> onItemSelected,
     String initialSearchQuery = '',
+    required ValueChanged<T?> onItemSelected,
   }) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -650,7 +791,6 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
           children: [
             TextField(
               controller: _searchController,
-              // Rimosso autofocus: true per permettere alla griglia di ricevere il focus
               decoration: InputDecoration(
                 hintText: 'Cerca...',
                 prefixIcon: const Icon(Icons.search),
@@ -677,11 +817,11 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
                           navigationMode: GridNavigationMode.cell, // Abilita la navigazione cella per cella con tastiera
                           onCellTap: (DataGridCellTapDetails details) {
                             if (details.rowColumnIndex.rowIndex > 0) {
-                              // Escludi la riga dell'header
+                              // Exclude header row
                               final int dataRowIndex = details.rowColumnIndex.rowIndex - 1;
                               if (dataRowIndex >= 0 && dataRowIndex < _filteredItems.length) {
                                 final Struttura selectedStruttura = _filteredItems[dataRowIndex] as Struttura;
-                                // Se la cella tappata è l'icona della mappa, lancia la mappa, altrimenti esci con la selezione
+                                // If the tapped cell is the map icon, launch map, otherwise pop with selection
                                 if (details.column.columnName == 'mappa') {
                                   widget.onLaunchMaps(selectedStruttura.indirizzo);
                                 } else {
@@ -692,7 +832,7 @@ class _SearchDialogState<T> extends State<_SearchDialog<T>> {
                           },
                         )
                       : ListView.builder(
-                          // Fallback per altri tipi (es. String per i ruoli)
+                          // Fallback for other types (e.g. String for roles)
                           itemCount: _filteredItems.length,
                           itemBuilder: (context, index) {
                             final item = _filteredItems[index];
@@ -748,20 +888,17 @@ class _StrutturaSearchDataSource extends DataGridSource {
 
   @override
   DataGridRowAdapter buildRow(DataGridRow row) {
-    // Trova l'oggetto Struttura originale dalla cella 'mappa'
     final Struttura? originalStruttura = row.getCells().firstWhereOrNull((cell) => cell.columnName == 'mappa')?.value as Struttura?;
 
     final bool isSelected = originalStruttura != null && _selectedValue != null && _areStructuresEqualCallback(originalStruttura, _selectedValue);
 
-    // DEBUGGING: Stampa lo stato di selezione per ogni riga
-    print('Struttura ID: ${originalStruttura?.id}, Nome: ${originalStruttura?.nome}, isSelected: $isSelected');
+    print('Struttura ID: ${originalStruttura?.id}, Nome: ${originalStruttura?.nome}, isSelected: $isSelected'); // Debugging
 
     Color? rowColor;
     if (isSelected) {
       final BuildContext? currentContext = NavigationService.navigatorKey.currentContext;
       if (currentContext != null) {
-        // Ripristinato il colore di evidenziazione del tema
-        rowColor = Colors.amber[300]; // Theme.of(currentContext).highlightColor.withAlpha((0.3 * 255).round());
+        rowColor = Colors.amber[300];
       } else {
         print("Warning: NavigationService.navigatorKey.currentContext is null in _StrutturaSearchDataSource.buildRow. Cannot apply theme highlight.");
         rowColor = Colors.amber[300];
@@ -841,7 +978,7 @@ class _GenericSearchDataSource<T> extends DataGridSource {
 // --- DATASOURCE (CORRETTO) ---
 class _ColleghiDataSource extends DataTableSource {
   final List<Collega> colleghi;
-  final int? currentUserId;
+  final String? currentUserId;
   final Function(Collega) onSelect;
 
   _ColleghiDataSource({required this.colleghi, required this.currentUserId, required this.onSelect});
@@ -850,6 +987,8 @@ class _ColleghiDataSource extends DataTableSource {
   DataRow getRow(int index) {
     final collega = colleghi[index];
     final isCurrentUser = collega.id == currentUserId;
+
+    print('ColleghiDataSource: Collega: ${collega.cognome}, Photo URL: ${collega.photoUrl}'); // Debugging Photo URL
 
     return DataRow.byIndex(
       index: index,
@@ -862,9 +1001,23 @@ class _ColleghiDataSource extends DataTableSource {
             onChanged: isCurrentUser ? null : (v) => onSelect(collega),
           ),
         ),
+        DataCell(
+          CircleAvatar(
+            backgroundColor: Colors.grey[200], // Light grey background for placeholder
+            backgroundImage: (collega.photoUrl != null && Uri.tryParse(collega.photoUrl!)?.isAbsolute == true)
+                ? NetworkImage(collega.photoUrl!) // Load network image if URL is valid and absolute
+                : null, // No background image if URL is invalid or null/empty
+            child: (collega.photoUrl == null || collega.photoUrl!.isEmpty || Uri.tryParse(collega.photoUrl!)?.isAbsolute != true)
+                ? Icon(Icons.person, color: Colors.grey[600], size: 28) // Placeholder icon if no valid photo URL
+                : null, // No child if image is loaded
+          ),
+        ),
+        DataCell(Text(collega.ente)),
+        DataCell(Text(collega.id)),
         DataCell(Text(collega.cognome)),
         DataCell(Text(collega.nome)),
         DataCell(Text(collega.email)),
+        DataCell(Text(collega.telefoni.join(', '))), // Display telephones, joined by comma
       ],
     );
   }
