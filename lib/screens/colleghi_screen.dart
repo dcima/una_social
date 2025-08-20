@@ -6,9 +6,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/helpers/db_grid.dart'; // Import the new DBGridWidget
 import 'package:una_social/helpers/logger_helper.dart'; // Assuming logger_helper.dart exists
 
-// Removed the Personale model and ColleaguesDataSource from here
-// as DBGridWidget handles generic Map<String, dynamic> data.
-
 class ColleghiScreen extends StatefulWidget {
   const ColleghiScreen({super.key});
 
@@ -40,30 +37,30 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       _rpcParamsErrorMessage = null;
     });
     try {
-      appLogger.info('ColleghiScreen: Inizio risoluzione parametri RPC.');
+      appLogger.info('ColleghiScreen: Starting RPC parameter resolution.');
 
       // --- Step 1: Fetch the structure ID based on its name and entity ---
-      appLogger.info('ColleghiScreen: Caricamento ID struttura per "$_targetStrutturaNome"');
+      appLogger.info('ColleghiScreen: Loading structure ID for "$_targetStrutturaNome"');
       final List<Map<String, dynamic>> structures = await Supabase.instance.client.from('strutture').select('id').eq('ente', _targetEnte).eq('nome', _targetStrutturaNome).limit(1);
 
       if (structures.isEmpty) {
-        _rpcParamsErrorMessage = 'Struttura "$_targetStrutturaNome" non trovata per l\'ente "$_targetEnte".';
+        _rpcParamsErrorMessage = 'Structure "$_targetStrutturaNome" not found for entity "$_targetEnte".';
         appLogger.error(_rpcParamsErrorMessage!);
       } else {
         final int strutturaId = structures.first['id'] as int;
-        appLogger.info('ColleghiScreen: ID struttura trovato: $strutturaId');
+        appLogger.info('ColleghiScreen: Structure ID found: $strutturaId');
         _resolvedRpcParams = {
           'p_ente': _targetEnte,
           'p_struttura_id': strutturaId,
         };
       }
     } catch (e, s) {
-      _rpcParamsErrorMessage = 'Errore nel caricamento dei parametri RPC: $e';
-      appLogger.error('ColleghiScreen: Errore risoluzione parametri RPC: $e', e, s);
+      _rpcParamsErrorMessage = 'Error loading RPC parameters: $e';
+      appLogger.error('ColleghiScreen: Error resolving RPC parameters: $e', e, s);
     } finally {
       setState(() {
         _isLoadingRpcParams = false;
-        appLogger.info('ColleghiScreen: Fine risoluzione parametri RPC.');
+        appLogger.info('ColleghiScreen: Finished RPC parameter resolution.');
       });
     }
   }
@@ -74,7 +71,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Colleghi dell\'Università'),
+        title: const Text('University Colleagues'),
       ),
       body: _isLoadingRpcParams
           ? const Center(child: CircularProgressIndicator())
@@ -91,7 +88,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
                       const SizedBox(height: 20),
                       ElevatedButton(
                         onPressed: _resolveRpcParameters,
-                        child: const Text('Riprova Caricamento Parametri'),
+                        child: const Text('Retry Parameter Loading'),
                       ),
                     ],
                   ),
@@ -103,25 +100,26 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
                     Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Text(
-                        'Elenco dei Colleghi per $_targetStrutturaNome:',
-                        style: Theme.of(context).textTheme.headlineSmall,
+                        'List of Colleagues for $_targetStrutturaNome:',
+                        style: Theme.of(context).textTheme.labelMedium,
                       ),
                     ),
                     Expanded(
                       // DBGridWidget takes the remaining vertical space
                       child: DBGridWidget(
                         config: DBGridConfig(
-                          dataSourceTable: 'personale', // Logical table name for identification
+                          dataSourceTable: 'colleghi', // Logical table name for identification
+                          emptyDataMessage: "No colleagues found for this structure.",
+                          fixedColumnsCount: 0,
+                          initialSortBy: const [], // Sorting is handled by the RPC
+                          pageLength: 20, // Page length is now used by the RPC
+                          primaryKeyColumns: const ['ente', 'struttura', 'email_principale'], // Define primary keys for row identification
                           rpcFunctionName: 'get_colleagues_by_struttura',
                           rpcFunctionParams: _resolvedRpcParams,
-                          pageLength: 20, // This might be ignored if RPC returns all data
+                          selectable: true, // Set to true if you want row selection
                           showHeader: true,
-                          fixedColumnsCount: 0,
-                          selectable: false, // Set to true if you want row selection
-                          emptyDataMessage: "Nessun collega trovato per questa struttura.",
-                          initialSortBy: const [], // Sorting is handled by the RPC
                           uiModes: const [UIMode.grid], // Only grid view for now
-                          primaryKeyColumns: const ['ente', 'id'], // Define primary keys for row identification
+                          excludeColumns: const ['ente', 'struttura', 'telefoni', 'ruoli', 'altre_emails'], // UPDATED: Exclude these columns from display
                         ),
                       ),
                     ),

@@ -1,13 +1,14 @@
 // lib/helpers/db_grid.dart
-// ignore_for_file: prefer_final_fields, prefer_const_constructors_in_immutables, library_private_types_in_public_api, depend_on_referenced_packages
+// ignore_for_file: prefer_final_fields, prefer_const_constructors_in_immutables, library_private_types_in_public_api, depend_on_referenced_packages, avoid_print
 
-import 'dart:convert'; // Added for jsonDecode
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
-import 'package:una_social/helpers/logger_helper.dart'; // Assuming logger_helper.dart exists
-import 'package:una_social/helpers/db_grid_form_view.dart'; // Import the new form view
-import 'package:collection/collection.dart'; // Add this import for firstWhereOrNull
+import 'package:una_social/helpers/logger_helper.dart';
+import 'package:una_social/helpers/db_grid_form_view.dart';
+import 'package:collection/collection.dart';
+import 'dart:convert';
+import 'dart:async';
 
 // --------------- ENUMS E CLASSI DI CONFIGURAZIONE ---------------
 enum SortDirection { asc, desc }
@@ -21,20 +22,21 @@ class SortColumn {
 }
 
 class DBGridConfig {
-  final String dataSourceTable; // Still useful as a logical identifier or for direct table access
-  final String? rpcFunctionName; // New: Name of the Supabase RPC function to call
-  final Map<String, dynamic>? rpcFunctionParams; // New: Parameters for the RPC function
+  final String dataSourceTable;
+  final String? rpcFunctionName;
+  final Map<String, dynamic>? rpcFunctionParams;
   final int pageLength;
   final bool showHeader;
   final int fixedColumnsCount;
   final bool selectable;
   final String emptyDataMessage;
-  final List<SortColumn> initialSortBy; // Used only if rpcFunctionName is null
+  final List<SortColumn> initialSortBy;
   final List<UIMode> uiModes;
   final String? formHookName;
   final String? mapHookName;
   final Function(UIMode newMode)? onViewModeChanged;
-  final List<String> primaryKeyColumns; // For identifying PKs in the form view
+  final List<String> primaryKeyColumns;
+  final List<String> excludeColumns; // Columns to exclude from grid display
 
   DBGridConfig({
     required this.dataSourceTable,
@@ -50,7 +52,8 @@ class DBGridConfig {
     this.formHookName,
     this.mapHookName,
     this.onViewModeChanged,
-    this.primaryKeyColumns = const ['id'], // Default to 'id'
+    this.primaryKeyColumns = const ['id'],
+    this.excludeColumns = const [], // Default to empty list for backward compatibility
   }) : assert(pageLength > 0, 'pageLength must be greater than 0');
 }
 
@@ -90,20 +93,23 @@ class DBGridWidget extends DBGridAbstractWidget {
 
 class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   late _DBGridDataSource _dataSource;
-  List<Map<String, dynamic>> _data = []; // Data for the current grid page
+  List<Map<String, dynamic>> _data = [];
   List<GridColumn> _columns = [];
   bool _isLoading = true;
   String _errorMessage = '';
 
   int _currentPage = 0;
   int _totalRecords = 0;
-  // Note: _totalPages will be 1 if using an RPC that returns all data (not paginated)
   int get _totalPages => _totalRecords > 0 && widget.config.pageLength > 0 ? (_totalRecords / widget.config.pageLength).ceil() : 0;
 
   DataGridController _dataGridController = DataGridController();
   Map<String, DataGridSortDirection?> _sortedColumnsState = {};
   late UIMode _currentUIMode;
-  int _currentFormRecordIndex = -1; // Index of the current record being viewed in form mode within _data
+  int _currentFormRecordIndex = -1;
+
+  // NEW: Filtering state
+  Map<String, String> _filterValues = {}; // Map: column name -> filter text
+  Timer? _filterDebounce; // For filter debouncing
 
   @override
   void initState() {
@@ -118,8 +124,26 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         if (mounted) setState(() {});
       },
       areMapsEqualCallback: _areMapsEqual,
+      // NEW: Callback for server-side sorting requests from DataGridSource
+      onSortRequest: (sortColumns) {
+        if (!mounted) return;
+        setState(() {
+          _sortedColumnsState.clear();
+          if (sortColumns.isNotEmpty) {
+            final sortCol = sortColumns.first;
+            _sortedColumnsState[sortCol.columnName] = sortCol.sortDirection;
+          }
+        });
+        _fetchData(isRefresh: true);
+      },
     );
     _fetchData(isRefresh: true);
+  }
+
+  @override
+  void dispose() {
+    _filterDebounce?.cancel(); // Cancel debounce timer on dispose
+    super.dispose();
   }
 
   // Centralized map comparison logic
@@ -146,9 +170,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     return true;
   }
 
-  // ##################################################################
-  // ### MODIFIED _fetchData method to support RPC calls and fix type issues ###
-  // ##################################################################
   Future<void> _fetchData({bool isRefresh = false}) async {
     if (!mounted) return;
 
@@ -166,46 +187,69 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     });
 
     try {
-      PostgrestResponse<dynamic> response; // Use dynamic here to handle both List and Map responses
-      final fromRecord = _currentPage * widget.config.pageLength;
       final limit = widget.config.pageLength;
-      final offset = fromRecord;
+      final offset = _currentPage * limit;
 
       if (widget.config.rpcFunctionName != null) {
-        // --- Call an RPC function ---
-        appLogger.info('Calling RPC: ${widget.config.rpcFunctionName} with params: ${widget.config.rpcFunctionParams}');
+        appLogger.info('Calling RPC: ${widget.config.rpcFunctionName}');
 
-        response = await Supabase.instance.client.rpc(
+        // Prepare RPC parameters for pagination, sorting, and filtering
+        final Map<String, dynamic> rpcParams = Map.from(widget.config.rpcFunctionParams ?? {});
+        rpcParams['p_limit'] = limit;
+        rpcParams['p_offset'] = offset;
+
+        // Add sorting parameters
+        final sortedColumn = _sortedColumnsState.entries.firstOrNull;
+        if (sortedColumn != null) {
+          rpcParams['p_order_by'] = sortedColumn.key;
+          rpcParams['p_order_direction'] = sortedColumn.value == DataGridSortDirection.ascending ? 'asc' : 'desc';
+        } else {
+          // Default sorting if not specified by user
+          rpcParams['p_order_by'] = widget.config.initialSortBy.isNotEmpty ? widget.config.initialSortBy.first.column : 'cognome'; // Default to 'cognome'
+          rpcParams['p_order_direction'] = widget.config.initialSortBy.isNotEmpty && widget.config.initialSortBy.first.direction == SortDirection.desc ? 'desc' : 'asc';
+        }
+
+        // Add filtering parameters (supports only one active filter for simplicity)
+        // Find the first column with a non-empty filter value
+        final activeFilter = _filterValues.entries.firstWhereOrNull((e) => e.value.isNotEmpty);
+        if (activeFilter != null) {
+          rpcParams['p_filter_column'] = activeFilter.key;
+          rpcParams['p_filter_value'] = activeFilter.value;
+        } else {
+          rpcParams['p_filter_column'] = null;
+          rpcParams['p_filter_value'] = null;
+        }
+
+        appLogger.info('RPC final params: $rpcParams');
+
+        final dynamic rpcResult = await Supabase.instance.client.rpc(
           widget.config.rpcFunctionName!,
-          params: widget.config.rpcFunctionParams ?? {},
+          params: rpcParams,
         );
 
-        if (response.data is List) {
-          _data = List<Map<String, dynamic>>.from(response.data);
-          _totalRecords = _data.length; // Assuming RPC returns all data, so total records is the length of fetched data.
-        } else if (response.data != null) {
-          // If RPC returns a single object (e.g., for a specific ID), wrap it in a list
-          _data = [Map<String, dynamic>.from(response.data)];
+        appLogger.info('RPC raw result: $rpcResult');
+
+        // Handle JSONB return type { "data": [...], "count": N }
+        if (rpcResult is Map<String, dynamic> && rpcResult.containsKey('data') && rpcResult.containsKey('count')) {
+          _data = List<Map<String, dynamic>>.from(rpcResult['data'] ?? []);
+          _totalRecords = rpcResult['count'] as int;
+        } else if (rpcResult is List) {
+          _data = List<Map<String, dynamic>>.from(rpcResult);
+          _totalRecords = _data.length; // Fallback: assume all data returned if not JSONB
+          appLogger.warning('RPC did not return expected JSONB with data and count. Assuming all data returned.');
+        } else if (rpcResult != null) {
+          _data = [Map<String, dynamic>.from(rpcResult)];
           _totalRecords = 1;
         } else {
           _data = [];
           _totalRecords = 0;
         }
       } else {
-        // --- Standard table selection ---
-        // Ensure explicit type for the query builder chain
-        PostgrestTransformBuilder query = Supabase.instance.client.from(widget.config.dataSourceTable).select();
+        // --- Standard table selection (existing logic) ---
+        final PostgrestResponse<dynamic> response = await Supabase.instance.client.from(widget.config.dataSourceTable).select().range(offset, offset + limit - 1).count(CountOption.exact);
 
-        // Apply sorting if available and not an RPC
-        if (_sortedColumnsState.isNotEmpty) {
-          final sortColumn = _sortedColumnsState.keys.first;
-          final sortDirection = _sortedColumnsState.values.first; // This is already non-nullable after the above check
-          query = query.order(sortColumn, ascending: sortDirection == DataGridSortDirection.ascending);
-        }
-
-        response = await query.range(offset, offset + limit - 1).count(CountOption.exact);
         _data = List<Map<String, dynamic>>.from(response.data ?? []);
-        _totalRecords = response.count;
+        _totalRecords = response.count ?? 0;
       }
 
       if (!mounted) return;
@@ -250,9 +294,12 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         }
       }
 
+      // Handle column regeneration (includes exclusion)
       bool needsColumnRegeneration = _columns.isEmpty || isRefresh;
       if (!needsColumnRegeneration && _data.isNotEmpty) {
-        int currentDataColumns = _data.first.keys.length;
+        // Get keys that are not in excludeColumns
+        final currentDataKeys = _data.first.keys.where((key) => !widget.config.excludeColumns.contains(key)).toList();
+        int currentDataColumns = currentDataKeys.length;
         int displayedColumns = _columns.length - (widget.config.selectable ? 1 : 0);
         if (currentDataColumns != displayedColumns) {
           needsColumnRegeneration = true;
@@ -260,13 +307,15 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       }
 
       if (needsColumnRegeneration && _data.isNotEmpty) {
-        _columns = _generateColumns(_data.first.keys.toList());
+        // Pass only non-excluded column names to _generateColumns
+        _columns = _generateColumns(_data.first.keys.where((key) => !widget.config.excludeColumns.contains(key)).toList());
       } else if (needsColumnRegeneration && _data.isEmpty) {
         _columns = [];
       }
 
       _dataSource.updateDataGridSource(_data);
 
+      // Logic for form mode
       if (_currentUIMode == UIMode.form && _data.isNotEmpty) {
         final Map<String, dynamic>? previouslySelected = _dataSource.getSelectedDataForForm();
         if (previouslySelected != null) {
@@ -291,8 +340,8 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       }
     } catch (e, s) {
       if (mounted) {
-        appLogger.error('Errore fetch data per ${widget.config.dataSourceTable}: $e', e, s);
-        _errorMessage = 'Errore nel caricamento dati: $e';
+        appLogger.error('Error fetching data for ${widget.config.dataSourceTable}: $e', e, s);
+        _errorMessage = 'Error loading data: $e';
         _totalRecords = 0;
         _data.clear();
         _currentFormRecordIndex = -1;
@@ -325,57 +374,108 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
             tristate: true,
           )));
     }
-    for (var name in columnNames) {
-      if (name == '_selector') continue;
+
+    // Handle 'photo_url' column specifically
+    if (columnNames.contains('photo_url') && !widget.config.excludeColumns.contains('photo_url')) {
       cols.add(GridColumn(
-        columnName: name,
-        label: GestureDetector(
-          onTap: () => _handleSortRequest(name),
-          child: Container(
-            padding: const EdgeInsets.all(12.0),
-            alignment: Alignment.centerLeft,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(child: Text(_formatHeader(name), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold))),
-                if (widget.config.rpcFunctionName == null && _sortedColumnsState[name] != null)
-                  Icon(
-                    _sortedColumnsState[name] == DataGridSortDirection.ascending ? Icons.arrow_upward : Icons.arrow_downward,
-                    size: 16,
+        columnName: 'photo_url', // Use original column name for internal logic
+        label: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0), // Adjusted vertical padding
+          alignment: Alignment.centerLeft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Foto', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)), // Display 'Foto' as header
+              if (widget.config.rpcFunctionName != null)
+                SizedBox(
+                  height: 24,
+                  child: TextField(
+                    controller: TextEditingController(text: _filterValues['photo_url']),
+                    decoration: InputDecoration(
+                      hintText: 'Filter',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(4.0),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: Theme.of(context).cardColor,
+                    ),
+                    onChanged: (value) {
+                      _filterValues['photo_url'] = value;
+                      _debounceFilter();
+                    },
+                    onSubmitted: (value) {
+                      _fetchData(isRefresh: true);
+                    },
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
-        allowSorting: false, // Sorting is handled manually via _handleSortRequest (or by RPC)
+        allowSorting: true,
+        width: 80, // Set a reasonable width for the photo column
+      ));
+      // Remove 'photo_url' from the list to avoid duplicate processing
+      columnNames.remove('photo_url');
+    }
+
+    // Process remaining columns
+    for (var name in columnNames) {
+      if (widget.config.excludeColumns.contains(name)) {
+        continue; // Ensure excluded columns are skipped
+      }
+      cols.add(GridColumn(
+        columnName: name,
+        label: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0), // Adjusted vertical padding
+          alignment: Alignment.centerLeft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_formatHeader(name), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
+              if (widget.config.rpcFunctionName != null)
+                SizedBox(
+                  height: 24,
+                  child: TextField(
+                    controller: TextEditingController(text: _filterValues[name]),
+                    decoration: InputDecoration(
+                      hintText: 'Filter',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(4.0),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: Theme.of(context).cardColor,
+                    ),
+                    onChanged: (value) {
+                      _filterValues[name] = value;
+                      _debounceFilter();
+                    },
+                    onSubmitted: (value) {
+                      _fetchData(isRefresh: true);
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+        allowSorting: true,
       ));
     }
     return cols;
   }
 
-  void _handleSortRequest(String columnName) {
-    if (widget.config.rpcFunctionName != null) {
-      appLogger.warning("Sorting not supported via UI for RPC data source: ${widget.config.rpcFunctionName}");
-      return;
+  void _debounceFilter() {
+    if (_filterDebounce != null && _filterDebounce!.isActive) {
+      _filterDebounce!.cancel();
     }
-    appLogger.debug("Sort request for column: $columnName");
-    setState(() {
-      DataGridSortDirection? newDirection;
-      final currentDirection = _sortedColumnsState[columnName];
-
-      if (currentDirection == null) {
-        newDirection = DataGridSortDirection.ascending;
-      } else if (currentDirection == DataGridSortDirection.ascending) {
-        newDirection = DataGridSortDirection.descending;
-      } else {
-        newDirection = null; // Remove sorting for this column
-      }
-      _sortedColumnsState.clear(); // Clear previous sorts
-      if (newDirection != null) {
-        _sortedColumnsState[columnName] = newDirection;
-      }
+    _filterDebounce = Timer(const Duration(milliseconds: 500), () {
+      _fetchData(isRefresh: true);
     });
-    _fetchData(isRefresh: true);
   }
 
   String _formatHeader(String text) {
@@ -389,14 +489,32 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       cells.add(DataGridCell<Map<String, dynamic>>(columnName: '_selector', value: rowData));
     }
     rowData.forEach((key, value) {
-      if (key == '_selector') return;
-      // Special handling for List types (like telefoni, ruoli, altre_emails)
-      if (value is List) {
-        // For telephony, assuming it's List of {'t': type, 'v': value}
+      // Exclude specified columns from rowData
+      if (widget.config.excludeColumns.contains(key) || key == '_selector') {
+        return;
+      }
+
+      if (key == 'photo_url') {
+        final String? photoUrl = value?.toString();
+        Widget imageWidget;
+        if (photoUrl != null && Uri.tryParse(photoUrl)?.hasAbsolutePath == true) {
+          imageWidget = Image.network(
+            photoUrl,
+            fit: BoxFit.cover,
+            width: 40, // Adjust size as needed
+            height: 40,
+            errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, size: 40), // Placeholder on error
+          );
+        } else {
+          imageWidget = const Icon(Icons.person, size: 40); // Anonymous user icon
+        }
+        cells.add(DataGridCell<Widget>(columnName: key, value: imageWidget));
+      }
+      // Special handling for List types (e.g., telefoni, ruoli, altre_emails)
+      else if (value is List) {
         if (key == 'telefoni') {
           cells.add(DataGridCell<String>(columnName: key, value: (value).map((e) => e['v']?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
         } else {
-          // For other lists, just join values
           cells.add(DataGridCell<String>(columnName: key, value: (value).map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
         }
       } else {
@@ -450,9 +568,9 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   }
 
   void _handleFormHook(Map<String, dynamic> recordData) {
-    appLogger.info("Trigger Form Hook: ${widget.config.formHookName} con dati: $recordData");
+    appLogger.info("Trigger Form Hook: ${widget.config.formHookName} with data: $recordData");
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Form Hook '${widget.config.formHookName}' chiamato per ID: ${recordData['id'] ?? 'N/D'}")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Form Hook '${widget.config.formHookName}' called for ID: ${recordData['id'] ?? 'N/A'}")));
     }
   }
 
@@ -489,11 +607,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   }
 
   @override
-  bool canGoToNextRecordInForm() {
-    return _currentFormRecordIndex < _data.length - 1;
-  }
-
-  @override
   void goToPreviousRecordInForm() {
     if (canGoToPreviousRecordInForm()) {
       setState(() {
@@ -501,6 +614,11 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         _setSelectedRecordForForm(_data[_currentFormRecordIndex]);
       });
     }
+  }
+
+  @override
+  bool canGoToNextRecordInForm() {
+    return _currentFormRecordIndex < _data.length - 1;
   }
 
   @override
@@ -565,12 +683,12 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         }
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _currentUIMode == UIMode.form) {
-            appLogger.warning("DBGridWidget: In Form Mode ma nessun record valido. Ritorno alla griglia.");
+            appLogger.warning("DBGridWidget: In Form Mode but no valid record. Returning to grid.");
             setState(() {
               _currentUIMode = widget.config.uiModes.firstWhereOrNull((m) => m == UIMode.grid) ?? widget.config.uiModes.first;
               widget.config.onViewModeChanged?.call(_currentUIMode);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Nessun record selezionato per il modulo. Visualizzazione Griglia.")));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No record selected for form. Displaying Grid View.")));
               }
             });
           }
@@ -579,14 +697,12 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       case UIMode.map:
         return Center(
             child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [Text("Vista Mappa (Non Implementata per ${widget.config.dataSourceTable})"), const SizedBox(height: 20), ElevatedButton(onPressed: _toggleUIMode, child: const Text("Torna alla Griglia"))]));
+                mainAxisAlignment: MainAxisAlignment.center, children: [Text("Map View (Not Implemented for ${widget.config.dataSourceTable})"), const SizedBox(height: 20), ElevatedButton(onPressed: _toggleUIMode, child: const Text("Back to Grid"))]));
     }
   }
 
   Widget _buildPaginationControls() {
-    // Hide pagination if an RPC is used (assuming RPC returns all data) or if there's only one page
-    if (widget.config.rpcFunctionName != null || _totalPages <= 1) {
+    if ((widget.config.rpcFunctionName != null && _totalPages <= 1) || (_totalRecords == 0 && _errorMessage.isNotEmpty)) {
       return const SizedBox.shrink();
     }
 
@@ -594,21 +710,22 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       if (_isLoading) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [Text("Caricamento...", style: TextStyle(fontSize: 12))]),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [Text("Loading...", style: TextStyle(fontSize: 12))]),
         );
       }
       return const SizedBox.shrink();
     }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          IconButton(icon: const Icon(Icons.first_page), onPressed: _isLoading || _currentPage == 0 ? null : () => _goToPage(0), tooltip: "Prima pagina"),
-          IconButton(icon: const Icon(Icons.navigate_before), onPressed: _isLoading || _currentPage == 0 ? null : _previousPage, tooltip: "Pagina precedente"),
-          Expanded(child: Text('Pag. ${_currentPage + 1} di $_totalPages ($_totalRecords record)', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
-          IconButton(icon: const Icon(Icons.navigate_next), onPressed: _isLoading || _currentPage >= _totalPages - 1 ? null : _nextPage, tooltip: "Pagina successiva"),
-          IconButton(icon: const Icon(Icons.last_page), onPressed: _isLoading || _currentPage >= _totalPages - 1 || _totalPages == 0 ? null : () => _goToPage(_totalPages - 1), tooltip: "Ultima pagina"),
+          IconButton(icon: const Icon(Icons.first_page), onPressed: _isLoading || _currentPage == 0 ? null : () => _goToPage(0), tooltip: "First page"),
+          IconButton(icon: const Icon(Icons.navigate_before), onPressed: _isLoading || _currentPage == 0 ? null : _previousPage, tooltip: "Previous page"),
+          Expanded(child: Text('Page ${_currentPage + 1} of $_totalPages ($_totalRecords records)', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
+          IconButton(icon: const Icon(Icons.navigate_next), onPressed: _isLoading || _currentPage >= _totalPages - 1 ? null : _nextPage, tooltip: "Next page"),
+          IconButton(icon: const Icon(Icons.last_page), onPressed: _isLoading || _currentPage >= _totalPages - 1 || _totalPages == 0 ? null : () => _goToPage(_totalPages - 1), tooltip: "Last page"),
         ],
       ),
     );
@@ -633,15 +750,15 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
                 switch (mode) {
                   case UIMode.grid:
                     icon = Icons.grid_view_rounded;
-                    label = "Griglia";
+                    label = "Grid";
                     break;
                   case UIMode.form:
                     icon = Icons.article_outlined;
-                    label = "Modulo";
+                    label = "Form";
                     break;
                   case UIMode.map:
                     icon = Icons.map_outlined;
-                    label = "Mappa";
+                    label = "Map";
                     break;
                 }
                 return ButtonSegment<UIMode>(value: mode, icon: Icon(icon), label: Text(label));
@@ -655,17 +772,18 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
             )),
       Expanded(
         child: SfDataGrid(
-          key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _currentPage.toString() + _totalRecords.toString()),
+          key: ValueKey(
+              widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _currentPage.toString() + _totalRecords.toString() + _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_')),
           source: _dataSource,
           columns: _columns,
           controller: _dataGridController,
-          allowSorting: false,
+          allowSorting: true,
           selectionMode: widget.config.selectable ? SelectionMode.multiple : SelectionMode.single,
           navigationMode: GridNavigationMode.cell,
           frozenColumnsCount: widget.config.fixedColumnsCount + (widget.config.selectable ? 1 : 0),
           gridLinesVisibility: GridLinesVisibility.both,
           headerGridLinesVisibility: GridLinesVisibility.both,
-          columnWidthMode: ColumnWidthMode.fill, // Use fill to distribute width
+          columnWidthMode: ColumnWidthMode.fill,
           onCellDoubleTap: _handleRowDoubleTap,
           onCellTap: (DataGridCellTapDetails details) {
             final int rowIndex = details.rowColumnIndex.rowIndex;
@@ -691,6 +809,7 @@ class _DBGridDataSource extends DataGridSource {
   List<DataGridRow> _dataGridRows = [];
   final VoidCallback _onSelectionChanged;
   final bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) _areMapsEqualCallback;
+  final Function(List<SfDataGridSortColumn> sortColumns) _onSortRequest; // Corrected type
 
   _DBGridDataSource({
     required List<Map<String, dynamic>> gridData,
@@ -698,11 +817,13 @@ class _DBGridDataSource extends DataGridSource {
     required List<Map<String, dynamic>> selectedRowsDataMap,
     required VoidCallback onSelectionChanged,
     required bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) areMapsEqualCallback,
+    required Function(List<SfDataGridSortColumn> sortColumns) onSortRequest, // Corrected type
   })  : _gridDataInternal = gridData,
         _buildRowCallback = buildRowCallback,
         _selectedRowsDataMap = selectedRowsDataMap,
         _onSelectionChanged = onSelectionChanged,
-        _areMapsEqualCallback = areMapsEqualCallback {
+        _areMapsEqualCallback = areMapsEqualCallback,
+        _onSortRequest = onSortRequest {
     _buildDataGridRows();
   }
 
@@ -744,6 +865,17 @@ class _DBGridDataSource extends DataGridSource {
               onChanged: (bool? value) {
                 if (originalData != null) handleRowSelection(originalData, isSelected: value);
               },
+            );
+          }
+          // Special handling for the photo_url column to display the Widget directly
+          if (dataGridCell.columnName == 'photo_url' && dataGridCell.value is Widget) {
+            return Container(
+              alignment: Alignment.center, // Center the image
+              padding: const EdgeInsets.all(4.0), // Small padding for the image
+              child: ClipOval(
+                // Clip the image to a circle
+                child: dataGridCell.value as Widget,
+              ),
             );
           }
           return Container(alignment: Alignment.centerLeft, padding: const EdgeInsets.all(12.0), child: Text(dataGridCell.value?.toString() ?? '', overflow: TextOverflow.ellipsis));
@@ -802,12 +934,13 @@ class _DBGridDataSource extends DataGridSource {
   Map<String, dynamic>? getSelectedDataForForm() => _selectedRowsDataMap.length == 1 ? _selectedRowsDataMap.first : null;
   List<Map<String, dynamic>> get selectedRowsData => List.unmodifiable(_selectedRowsDataMap);
 
-  Future<void> handleSort() async {
-    appLogger.debug("_DBGridDataSource.handleSort() called. This is typically for client-side sorting via SfDataGrid's internal mechanism.");
+  @override
+  Future<void> handleDataGridSort(List<SfDataGridSortColumn> sortColumns) async {
+    appLogger.debug("_DBGridDataSource.handleDataGridSort() called with: $sortColumns");
+    _onSortRequest(sortColumns);
   }
 }
 
 class NavigationService {
-  // Ensure this is correctly set up in your app
   static GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 }

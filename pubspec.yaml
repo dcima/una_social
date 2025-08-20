@@ -2,7 +2,7 @@ name: una_social
 description: "Una Social"
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
-version: 0.0.0+543
+version: 0.0.0+556
 # A Flutter project to create a social app using Supabase and GoRouter  
 
 environment:
@@ -38,8 +38,8 @@ dependencies:
   share_plus: ^11.0.0
   supabase_auth_ui: ^0.5.5
   supabase_flutter: ^2.9.1 
-  syncfusion_flutter_core: ^30.1.38
-  syncfusion_flutter_datagrid: ^30.1.38
+  syncfusion_flutter_core: ^30.2.6
+  syncfusion_flutter_datagrid: ^30.2.6
   universal_html: ^2.2.4
   url_launcher: ^6.3.1
   scrollable_positioned_list: ^0.3.8
