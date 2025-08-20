@@ -101,15 +101,15 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
   int _currentPage = 0;
   int _totalRecords = 0;
-  int get _totalPages => _totalRecords > 0 && widget.config.pageLength > 0 ? (_totalRecords / widget.config.pageLength).ceil() : 0;
 
   DataGridController _dataGridController = DataGridController();
   Map<String, DataGridSortDirection?> _sortedColumnsState = {};
   late UIMode _currentUIMode;
   int _currentFormRecordIndex = -1;
 
-  // NEW: Filtering state
-  Map<String, String> _filterValues = {}; // Map: column name -> filter text
+  // Filtering state - Stores actual filter values and their controllers
+  final Map<String, String> _filterValues = {};
+  final Map<String, TextEditingController> _filterControllers = {};
   Timer? _filterDebounce; // For filter debouncing
 
   @override
@@ -117,6 +117,17 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     super.initState();
     _currentUIMode = widget.config.uiModes.isNotEmpty ? widget.config.uiModes.first : UIMode.grid;
     _initializeSortedColumns();
+
+    // Initialize filter controllers for all potentially filterable columns
+    // including those in fixedOrderColumns and any other dynamic columns.
+    // It's safer to initialize them all at once or dynamically as columns are generated.
+    // Here, we initialize for the fixed columns. Other columns will be putIfAbsent in _generateColumns.
+    final List<String> initialFilterableColumns = ['photo_url', 'cognome', 'nome', 'email_principale'];
+    for (var colName in initialFilterableColumns) {
+      _filterControllers[colName] = TextEditingController();
+      _filterValues[colName] = '';
+    }
+
     _dataSource = _DBGridDataSource(
       gridData: _data,
       buildRowCallback: _buildRow,
@@ -134,15 +145,19 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
             _sortedColumnsState[sortCol.name] = sortCol.sortDirection;
           }
         });
-        _fetchData(isRefresh: true);
+        _fetchData(isRefresh: true); // Trigger full refresh on sort change
       },
+      // Pass the widget's _fetchData method to the DataSource for handleLoadMoreRows
+      fetchDataCallback: (isRefresh) => _fetchData(isRefresh: isRefresh),
     );
-    _fetchData(isRefresh: true);
+
+    _fetchData(isRefresh: true); // Initial data fetch
   }
 
   @override
   void dispose() {
     _filterDebounce?.cancel(); // Cancel debounce timer on dispose
+    _filterControllers.forEach((key, controller) => controller.dispose()); // Dispose all controllers
     super.dispose();
   }
 
@@ -175,24 +190,33 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
     if (isRefresh) {
       _currentPage = 0;
+      _data.clear(); // Clear existing data on full refresh/filter change
+      _dataSource.clearSelections();
       _currentFormRecordIndex = -1; // Reset form index on full refresh
+    } else {
+      // For infinite scroll, increment page before fetching
+      _currentPage++;
+    }
+
+    // Prevent fetching if all records are already loaded (for infinite scroll)
+    if (_data.isNotEmpty && _data.length >= _totalRecords && !isRefresh) {
+      appLogger.info("All records already loaded. Not fetching more.");
+      setState(() => _isLoading = false); // Ensure loading state is false
+      return;
     }
 
     setState(() {
       _isLoading = true;
       _errorMessage = '';
-      if (isRefresh) {
-        _dataSource.clearSelections();
-      }
     });
 
     try {
-      final limit = widget.config.pageLength;
-      final offset = _currentPage * limit;
+      final int limit = widget.config.pageLength;
+      final int offset = _currentPage * limit;
+
+      dynamic rpcResult; // Declare rpcResult here to ensure scope
 
       if (widget.config.rpcFunctionName != null) {
-        //appLogger.info('Calling RPC: ${widget.config.rpcFunctionName}');
-
         // Prepare RPC parameters for pagination, sorting, and filtering
         final Map<String, dynamic> rpcParams = Map.from(widget.config.rpcFunctionParams ?? {});
         rpcParams['p_limit'] = limit;
@@ -204,13 +228,11 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           rpcParams['p_order_by'] = sortedColumn.key;
           rpcParams['p_order_direction'] = sortedColumn.value == DataGridSortDirection.ascending ? 'asc' : 'desc';
         } else {
-          // Default sorting if not specified by user
-          rpcParams['p_order_by'] = widget.config.initialSortBy.isNotEmpty ? widget.config.initialSortBy.first.column : 'cognome'; // Default to 'cognome'
+          rpcParams['p_order_by'] = widget.config.initialSortBy.isNotEmpty ? widget.config.initialSortBy.first.column : 'cognome';
           rpcParams['p_order_direction'] = widget.config.initialSortBy.isNotEmpty && widget.config.initialSortBy.first.direction == SortDirection.desc ? 'desc' : 'asc';
         }
 
-        // Add filtering parameters (supports only one active filter for simplicity)
-        // Find the first column with a non-empty filter value
+        // Add filtering parameters (supports only one active filter for simplicity with current RPC)
         final activeFilter = _filterValues.entries.firstWhereOrNull((e) => e.value.isNotEmpty);
         if (activeFilter != null) {
           rpcParams['p_filter_column'] = activeFilter.key;
@@ -222,42 +244,41 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
         appLogger.info('RPC final params: $rpcParams');
 
-        final dynamic rpcResult = await Supabase.instance.client.rpc(
+        rpcResult = await Supabase.instance.client.rpc(
           widget.config.rpcFunctionName!,
           params: rpcParams,
         );
 
-        //appLogger.info('RPC raw result: $rpcResult');
-
         // Handle JSONB return type { "data": [...], "count": N }
         if (rpcResult is Map<String, dynamic> && rpcResult.containsKey('data') && rpcResult.containsKey('count')) {
-          _data = List<Map<String, dynamic>>.from(rpcResult['data'] ?? []);
-          _totalRecords = rpcResult['count'] as int;
+          _data.addAll(List<Map<String, dynamic>>.from(rpcResult['data'] ?? []));
+          _totalRecords = (rpcResult['count'] as num?)?.toInt() ?? 0; // Safe cast from num to int
         } else if (rpcResult is List) {
-          _data = List<Map<String, dynamic>>.from(rpcResult);
+          _data.addAll(List<Map<String, dynamic>>.from(rpcResult));
           _totalRecords = _data.length; // Fallback: assume all data returned if not JSONB
           appLogger.warning('RPC did not return expected JSONB with data and count. Assuming all data returned.');
         } else if (rpcResult != null) {
-          _data = [Map<String, dynamic>.from(rpcResult)];
+          _data.add(Map<String, dynamic>.from(rpcResult));
           _totalRecords = 1;
         } else {
-          _data = [];
-          _totalRecords = 0;
+          _totalRecords = _data.length; // No new data added, total remains current size
         }
       } else {
-        // --- Standard table selection (existing logic) ---
+        // --- Standard table selection (existing logic, not ideal for infinite scroll without count from select) ---
         final PostgrestResponse<dynamic> response = await Supabase.instance.client.from(widget.config.dataSourceTable).select().range(offset, offset + limit - 1).count(CountOption.exact);
 
-        _data = List<Map<String, dynamic>>.from(response.data ?? []);
+        _data.addAll(List<Map<String, dynamic>>.from(response.data ?? []));
         _totalRecords = response.count;
       }
 
       if (!mounted) return;
 
-      // Handle decoding of JSONB strings if they come as strings from Supabase
-      _data = _data.map((row) {
+      // Decode JSONB strings for newly added/refreshed data
+      final int startIndexForDecoding = isRefresh ? 0 : _data.length - (rpcResult is Map && rpcResult.containsKey('data') ? ((rpcResult['data']?.length ?? 0) as num).toInt() : (rpcResult is List ? rpcResult.length.toInt() : 0));
+      for (int i = startIndexForDecoding; i < _data.length; i++) {
+        final Map<String, dynamic> row = _data[i];
         final Map<String, dynamic> newRow = Map.from(row);
-        // Helper function to decode JSON strings to List<dynamic>
+
         List<dynamic>? decodeJsonbList(dynamic value, String fieldName) {
           if (value is String) {
             try {
@@ -277,9 +298,8 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         newRow['telefoni'] = decodeJsonbList(newRow['telefoni'], 'telefoni');
         newRow['ruoli'] = decodeJsonbList(newRow['ruoli'], 'ruoli');
         newRow['altre_emails'] = decodeJsonbList(newRow['altre_emails'], 'altre_emails');
-
-        return newRow;
-      }).toList();
+        _data[i] = newRow; // Update the row in the main list
+      }
 
       if (_data.isEmpty && _totalRecords == 0 && _errorMessage.isEmpty) {
         _errorMessage = widget.config.emptyDataMessage;
@@ -297,7 +317,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       // Handle column regeneration (includes exclusion)
       bool needsColumnRegeneration = _columns.isEmpty || isRefresh;
       if (!needsColumnRegeneration && _data.isNotEmpty) {
-        // Get keys that are not in excludeColumns
         final currentDataKeys = _data.first.keys.where((key) => !widget.config.excludeColumns.contains(key)).toList();
         int currentDataColumns = currentDataKeys.length;
         int displayedColumns = _columns.length - (widget.config.selectable ? 1 : 0);
@@ -307,7 +326,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       }
 
       if (needsColumnRegeneration && _data.isNotEmpty) {
-        // Pass only non-excluded column names to _generateColumns
         _columns = _generateColumns(_data.first.keys.where((key) => !widget.config.excludeColumns.contains(key)).toList());
       } else if (needsColumnRegeneration && _data.isEmpty) {
         _columns = [];
@@ -315,7 +333,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
       _dataSource.updateDataGridSource(_data);
 
-      // Logic for form mode
+      // Logic for form mode (remains unchanged)
       if (_currentUIMode == UIMode.form && _data.isNotEmpty) {
         final Map<String, dynamic>? previouslySelected = _dataSource.getSelectedDataForForm();
         if (previouslySelected != null) {
@@ -352,6 +370,20 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
+  // NEW: Callback for SfDataGrid's onLoadMoreRows
+  // This method is called by SfDataGrid's internal mechanism when it needs more rows.
+  Future<void> handleLoadMoreRows() async {
+    // This method is called by SfDataGrid when it needs more rows.
+    // It should trigger fetching more data in the widget state.
+    // The _fetchData method already contains the logic to check if more data is available.
+    if (_data.length < _totalRecords && !_isLoading) {
+      appLogger.info("SfDataGrid onLoadMoreRows triggered. Current data length: ${_data.length}, Total records: $_totalRecords");
+      await _fetchData(isRefresh: false); // Fetch more data, append to existing
+    } else {
+      appLogger.info("SfDataGrid onLoadMoreRows skipped. All data loaded or currently loading.");
+    }
+  }
+
   void _initializeSortedColumns() {
     _sortedColumnsState.clear();
     for (var sortCol in widget.config.initialSortBy) {
@@ -359,10 +391,9 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
-  // MODIFICATO: Logica per definire l'ordine delle colonne in modo rigido
   List<GridColumn> _generateColumns(List<String> availableColumnNames) {
     List<GridColumn> cols = [];
-    Set<String> addedColumns = {}; // Per tenere traccia delle colonne già aggiunte
+    Set<String> addedColumns = {};
 
     if (widget.config.selectable) {
       cols.add(GridColumn(
@@ -379,102 +410,80 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       addedColumns.add('_selector');
     }
 
-    // Ordine fisso desiderato per le prime colonne
     final List<String> fixedOrderColumns = ['photo_url', 'cognome', 'nome', 'email_principale'];
 
-    // Aggiungi le colonne nell'ordine fisso desiderato
     for (String colName in fixedOrderColumns) {
-      // Verifica se la colonna è disponibile nei dati e non è esclusa per la visualizzazione
       if (availableColumnNames.contains(colName) && !widget.config.excludeColumns.contains(colName)) {
-        if (colName == 'photo_url') {
-          cols.add(GridColumn(
-            columnName: 'photo_url',
-            label: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-              alignment: Alignment.centerLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Foto', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
-                  if (widget.config.rpcFunctionName != null)
-                    SizedBox(
-                      height: 24,
-                      child: TextField(
-                        controller: TextEditingController(text: _filterValues['photo_url']),
-                        decoration: InputDecoration(
-                          hintText: 'Filter',
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(4.0),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Theme.of(context).cardColor,
+        // Ensure controller exists for this column. If not, create it.
+        _filterControllers.putIfAbsent(colName, () => TextEditingController());
+        _filterValues.putIfAbsent(colName, () => '');
+
+        cols.add(GridColumn(
+          columnName: colName,
+          label: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+            alignment: Alignment.centerLeft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_formatHeader(colName), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
+                if (widget.config.rpcFunctionName != null)
+                  SizedBox(
+                    height: 24,
+                    child: TextField(
+                      controller: _filterControllers[colName],
+                      decoration: InputDecoration(
+                        hintText: 'Filter',
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(4.0),
+                          borderSide: BorderSide.none,
                         ),
-                        onChanged: (value) {
-                          _filterValues['photo_url'] = value;
-                          _debounceFilter();
-                        },
-                        onSubmitted: (value) {
-                          _fetchData(isRefresh: true);
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            allowSorting: true,
-            width: 80,
-          ));
-        } else {
-          cols.add(GridColumn(
-            columnName: colName,
-            label: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-              alignment: Alignment.centerLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_formatHeader(colName), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
-                  if (widget.config.rpcFunctionName != null)
-                    SizedBox(
-                      height: 24,
-                      child: TextField(
-                        controller: TextEditingController(text: _filterValues[colName]),
-                        decoration: InputDecoration(
-                          hintText: 'Filter',
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(4.0),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Theme.of(context).cardColor,
+                        filled: true,
+                        fillColor: Theme.of(context).cardColor,
+                        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _filterControllers[colName]!,
+                          builder: (context, value, child) {
+                            return value.text.isNotEmpty
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear, size: 16),
+                                    onPressed: () {
+                                      _filterControllers[colName]!.clear();
+                                      _filterValues[colName] = '';
+                                      _fetchData(isRefresh: true);
+                                    },
+                                  )
+                                : const SizedBox.shrink();
+                          },
                         ),
-                        onChanged: (value) {
-                          _filterValues[colName] = value;
-                          _debounceFilter();
-                        },
-                        onSubmitted: (value) {
-                          _fetchData(isRefresh: true);
-                        },
                       ),
+                      onChanged: (value) {
+                        _filterValues[colName] = value;
+                        _debounceFilter();
+                      },
+                      onSubmitted: (value) {
+                        _fetchData(isRefresh: true);
+                      },
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
-            allowSorting: true,
-          ));
-        }
-        addedColumns.add(colName); // Segna la colonna come aggiunta
+          ),
+          allowSorting: true,
+          // Set width for photo_url; other columns will be handled by ColumnWidthMode.fill if width is null
+          width: colName == 'photo_url' ? 80 : 0,
+        ));
+        addedColumns.add(colName);
       }
     }
 
-    // Aggiungi le rimanenti colonne (non nell'ordine fisso e non escluse)
     for (var name in availableColumnNames) {
       if (!addedColumns.contains(name) && !widget.config.excludeColumns.contains(name)) {
+        // Ensure controller exists for this column. If not, create it.
+        _filterControllers.putIfAbsent(name, () => TextEditingController());
+        _filterValues.putIfAbsent(name, () => '');
+
         cols.add(GridColumn(
           columnName: name,
           label: Container(
@@ -488,7 +497,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
                   SizedBox(
                     height: 24,
                     child: TextField(
-                      controller: TextEditingController(text: _filterValues[name]),
+                      controller: _filterControllers[name],
                       decoration: InputDecoration(
                         hintText: 'Filter',
                         isDense: true,
@@ -499,6 +508,21 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
                         ),
                         filled: true,
                         fillColor: Theme.of(context).cardColor,
+                        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _filterControllers[name]!,
+                          builder: (context, value, child) {
+                            return value.text.isNotEmpty
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear, size: 16),
+                                    onPressed: () {
+                                      _filterControllers[name]!.clear();
+                                      _filterValues[name] = '';
+                                      _fetchData(isRefresh: true);
+                                    },
+                                  )
+                                : const SizedBox.shrink();
+                          },
+                        ),
                       ),
                       onChanged: (value) {
                         _filterValues[name] = value;
@@ -524,7 +548,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       _filterDebounce!.cancel();
     }
     _filterDebounce = Timer(const Duration(milliseconds: 500), () {
-      _fetchData(isRefresh: true);
+      _fetchData(isRefresh: true); // Trigger full refresh when filter changes
     });
   }
 
@@ -533,38 +557,27 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     return text.replaceAll('_', ' ').split(' ').map((str) => str.isEmpty ? '' : '${str[0].toUpperCase()}${str.substring(1).toLowerCase()}').join(' ');
   }
 
-  // MODIFICATO: Logica per estrarre l'URL dell'immagine da HTML per 'photo_url'
-  // e per popolare le celle nell'ordine corretto.
   DataGridRow _buildRow(Map<String, dynamic> rowData, int rowIndex) {
     List<DataGridCell> cells = [];
 
-    // 1. Aggiungi la colonna selettore se configurata
     if (widget.config.selectable) {
       cells.add(DataGridCell<Map<String, dynamic>>(columnName: '_selector', value: rowData));
     }
 
-    // 2. Itera sulle _columns definite per garantire l'ordine corretto delle celle
     for (var column in _columns) {
       final String columnName = column.columnName;
 
-      // Salta la colonna selettore, è già stata aggiunta
-      if (columnName == '_selector') {
+      if (columnName == '_selector' || widget.config.excludeColumns.contains(columnName)) {
         continue;
       }
 
-      // Salta le colonne escluse dalla configurazione (dovrebbero già essere escluse da _generateColumns)
-      if (widget.config.excludeColumns.contains(columnName)) {
-        continue;
-      }
-
-      final dynamic value = rowData[columnName]; // Ottieni il valore dalla riga di dati usando il nome della colonna
+      final dynamic value = rowData[columnName];
 
       if (columnName == 'photo_url') {
         String? photoUrl = value?.toString();
         String? finalImageUrl;
 
         if (photoUrl != null && photoUrl.isNotEmpty) {
-          // Tenta di parsare come HTML se la stringa sembra HTML
           if (photoUrl.trim().startsWith('<') && photoUrl.trim().endsWith('>') && photoUrl.contains('<img')) {
             try {
               final html.DomParser parser = html.DomParser();
@@ -572,36 +585,27 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
               final html.ImageElement? imgElement = document.querySelector('img') as html.ImageElement?;
               if (imgElement != null && imgElement.src != null) {
                 finalImageUrl = imgElement.src;
-                // Cruciale: decodifica l'entità HTML &amp; in & per un URL valido
                 finalImageUrl = finalImageUrl!.replaceAll('&amp;', '&');
-                appLogger.info("Parsed image URL from HTML: $finalImageUrl");
               } else {
                 appLogger.warning("Could not find <img> tag or src in HTML string: $photoUrl");
               }
             } catch (e) {
               appLogger.error("Error parsing HTML for photo_url: $e, original: $photoUrl");
-              // Fallback a interpretazione diretta se il parsing HTML fallisce
               finalImageUrl = photoUrl;
             }
           } else {
-            // Se non è HTML, usalo direttamente
             finalImageUrl = photoUrl;
           }
         }
 
         Widget imageWidget;
-        // Verifica se l'URL finale è valido e assoluto prima di tentare di caricarlo
         if (finalImageUrl != null && Uri.tryParse(finalImageUrl)?.isAbsolute == true) {
-          // AGGIUNTO: Utilizzo di cors-anywhere.herokuapp.com come proxy
-          // e impostazione di un User-Agent per la richiesta.
           final proxiedImageUrl = 'https://cors-anywhere.herokuapp.com/$finalImageUrl';
           imageWidget = Image(
             image: NetworkImage(
               proxiedImageUrl,
               headers: const {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.88 Safari/537.36',
-                // Potresti aggiungere altri header se il server unibo.it o il proxy li richiedono,
-                // ad esempio 'Referer': 'https://www.unibo.it/'
               },
             ),
             fit: BoxFit.cover,
@@ -609,16 +613,14 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
             height: 40,
             errorBuilder: (context, error, stackTrace) {
               appLogger.warning("Error loading image from URL: $proxiedImageUrl, Error: $error");
-              return const Icon(Icons.person, size: 40); // Placeholder in caso di errore di caricamento
+              return const Icon(Icons.person, size: 40);
             },
           );
         } else {
-          imageWidget = const Icon(Icons.person, size: 40); // Icona utente anonimo se URL non valido o mancante
+          imageWidget = const Icon(Icons.person, size: 40);
         }
         cells.add(DataGridCell<Widget>(columnName: columnName, value: imageWidget));
-      }
-      // Gestione speciale per i tipi List (es. telefoni, ruoli, altre_emails)
-      else if (value is List) {
+      } else if (value is List) {
         if (columnName == 'telefoni') {
           cells.add(DataGridCell<String>(columnName: columnName, value: (value).map((e) => e['v']?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
         } else {
@@ -738,41 +740,19 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
-  void _goToPage(int pageIndex) {
-    if (pageIndex >= 0 && (_totalPages == 0 || pageIndex < _totalPages) && pageIndex != _currentPage) {
-      setState(() {
-        _currentPage = pageIndex;
-      });
-      _fetchData();
-    } else if (pageIndex == 0 && _currentPage == 0 && _totalPages == 0 && _totalRecords == 0) {
-      setState(() {
-        _currentPage = pageIndex;
-      });
-      _fetchData();
-    }
-  }
-
-  void _nextPage() {
-    if (_currentPage < _totalPages - 1) {
-      _goToPage(_currentPage + 1);
-    }
-  }
-
-  void _previousPage() {
-    if (_currentPage > 0) {
-      _goToPage(_currentPage - 1);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_isLoading && _totalRecords == 0 && _data.isEmpty) {
+    // Adjusted initial loading/error checks
+    if (_isLoading && _data.isEmpty && _errorMessage.isEmpty) {
+      // Initial loading, no data yet
       return const Center(child: CircularProgressIndicator());
     }
-    if (_errorMessage.isNotEmpty && _totalRecords == 0 && _data.isEmpty) {
+    if (_errorMessage.isNotEmpty && _data.isEmpty) {
+      // Initial error, no data loaded
       return Center(child: Text(_errorMessage, style: const TextStyle(color: Colors.red)));
     }
-    if (!_isLoading && _totalRecords == 0 && _errorMessage.isEmpty) {
+    if (!_isLoading && _data.isEmpty && _errorMessage.isEmpty) {
+      // No data, not loading, no error means empty message
       return Center(child: Text(widget.config.emptyDataMessage));
     }
 
@@ -808,44 +788,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
-  Widget _buildPaginationControls() {
-    if ((widget.config.rpcFunctionName != null && _totalPages <= 1) || (_totalRecords == 0 && _errorMessage.isNotEmpty)) {
-      return const SizedBox.shrink();
-    }
-
-    if (_totalRecords == 0) {
-      if (_isLoading) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [Text("Loading...", style: TextStyle(fontSize: 12))]),
-        );
-      }
-      return const SizedBox.shrink();
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          IconButton(icon: const Icon(Icons.first_page), onPressed: _isLoading || _currentPage == 0 ? null : () => _goToPage(0), tooltip: "First page"),
-          IconButton(icon: const Icon(Icons.navigate_before), onPressed: _isLoading || _currentPage == 0 ? null : _previousPage, tooltip: "Previous page"),
-          Expanded(child: Text('Page ${_currentPage + 1} of $_totalPages ($_totalRecords records)', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
-          IconButton(icon: const Icon(Icons.navigate_next), onPressed: _isLoading || _currentPage >= _totalPages - 1 ? null : _nextPage, tooltip: "Next page"),
-          IconButton(icon: const Icon(Icons.last_page), onPressed: _isLoading || _currentPage >= _totalPages - 1 || _totalPages == 0 ? null : () => _goToPage(_totalPages - 1), tooltip: "Last page"),
-        ],
-      ),
-    );
-  }
-
   Widget _buildGridView() {
-    if (_columns.isEmpty && _totalRecords == 0) {
-      if (_isLoading) return const Center(child: CircularProgressIndicator());
-      return Center(child: Text(_errorMessage.isNotEmpty ? _errorMessage : widget.config.emptyDataMessage));
-    }
-    if (_columns.isEmpty && (_isLoading || _totalRecords > 0)) {
-      return const Center(child: CircularProgressIndicator());
-    }
     return Column(children: [
       if (widget.config.uiModes.length > 1)
         Padding(
@@ -879,8 +822,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
             )),
       Expanded(
         child: SfDataGrid(
-          key: ValueKey(
-              widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _currentPage.toString() + _totalRecords.toString() + _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_')),
+          key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_')),
           source: _dataSource,
           columns: _columns,
           controller: _dataGridController,
@@ -901,10 +843,65 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
               }
             }
           },
-          headerRowHeight: 70.0, // Increased height to accommodate header text and filter TextField
+          headerRowHeight: 70.0,
+          // NEW: Infinite scroll configuration
+          loadMoreViewBuilder: (BuildContext context, LoadMoreRows loadMoreRows) {
+            // This builder will display the loading indicator or status message.
+            // The `loadMoreRows` function is the one provided by SfDataGrid
+            // that you call to trigger loading more data.
+            // We'll call it within a FutureBuilder to manage the async call.
+
+            if (_data.length >= _totalRecords && _totalRecords > 0) {
+              // All data loaded
+              return Container(
+                height: 50.0,
+                alignment: Alignment.center,
+                child: Text('Tutti i $_totalRecords record caricati.', textAlign: TextAlign.center),
+              );
+            } else if (_isLoading) {
+              // Currently loading (either initial or more data)
+              return Container(
+                height: 50.0,
+                alignment: Alignment.center,
+                child: const CircularProgressIndicator(strokeWidth: 2),
+              );
+            } else {
+              // Not loading, but more data is available.
+              // Trigger `loadMoreRows` automatically if it's not already loading.
+              // Using FutureBuilder to ensure it's triggered once per visibility and manages its internal future.
+              return FutureBuilder<void>(
+                future: loadMoreRows(), // Call the provided loadMoreRows function
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Container(
+                      height: 50.0,
+                      alignment: Alignment.center,
+                      child: const CircularProgressIndicator(strokeWidth: 2),
+                    );
+                  } else if (snapshot.hasError) {
+                    appLogger.error("Error in loadMoreViewBuilder: ${snapshot.error}");
+                    return Container(
+                      height: 50.0,
+                      alignment: Alignment.center,
+                      child: Text('Errore caricamento dati: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
+                    );
+                  } else if (_data.length < _totalRecords) {
+                    return Container(
+                      height: 50.0,
+                      alignment: Alignment.center,
+                      child: Text('Scorri per caricare altri ${_totalRecords - _data.length} record (su $_totalRecords totali).', textAlign: TextAlign.center),
+                    );
+                  } else {
+                    return const SizedBox.shrink(); // All data loaded or other state
+                  }
+                },
+              );
+            }
+          },
         ),
       ),
-      _buildPaginationControls(),
+      // The external loading indicators and status texts are now managed within loadMoreViewBuilder.
+      // Removed previous conditional Padding widgets.
     ]);
   }
 }
@@ -918,6 +915,8 @@ class _DBGridDataSource extends DataGridSource {
   final VoidCallback _onSelectionChanged;
   final bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) _areMapsEqualCallback;
   final Function(List<SortColumnDetails> sortColumns) _onSortRequest;
+  // NEW: Callback to trigger data fetching in the StatefulWidget
+  final Function(bool isRefresh)? fetchDataCallback;
 
   _DBGridDataSource({
     required List<Map<String, dynamic>> gridData,
@@ -926,6 +925,7 @@ class _DBGridDataSource extends DataGridSource {
     required VoidCallback onSelectionChanged,
     required bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) areMapsEqualCallback,
     required Function(List<SortColumnDetails> sortColumns) onSortRequest,
+    this.fetchDataCallback, // Initialize the callback
   })  : _gridDataInternal = gridData,
         _buildRowCallback = buildRowCallback,
         _selectedRowsDataMap = selectedRowsDataMap,
@@ -975,7 +975,6 @@ class _DBGridDataSource extends DataGridSource {
               },
             );
           }
-          // Special handling for the photo_url column to display the Widget directly
           if (dataGridCell.columnName == 'photo_url' && dataGridCell.value is Widget) {
             return Container(
               alignment: Alignment.center, // Center the image
@@ -1045,6 +1044,14 @@ class _DBGridDataSource extends DataGridSource {
   Future<void> handleDataGridSort(List<SortColumnDetails> sortColumns) async {
     appLogger.debug("_DBGridDataSource.handleDataGridSort() called with: $sortColumns");
     _onSortRequest(sortColumns);
+  }
+
+  // Override the handleLoadMoreRows method from DataGridSource
+  @override
+  Future<void> handleLoadMoreRows() async {
+    // This method is called by the DataGrid's loadMoreViewBuilder mechanism.
+    // It should trigger the actual data fetching in the StatefulWidget.
+    fetchDataCallback?.call(false); // Call the callback with isRefresh: false
   }
 }
 
