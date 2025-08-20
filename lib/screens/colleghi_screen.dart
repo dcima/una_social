@@ -71,7 +71,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('University Colleagues'),
+        title: Text('Colleghi di $_targetStrutturaNome'),
       ),
       body: _isLoadingRpcParams
           ? const Center(child: CircularProgressIndicator())
@@ -112,7 +112,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
                           emptyDataMessage: "No colleagues found for this structure.",
                           fixedColumnsCount: 0,
                           initialSortBy: const [], // Sorting is handled by the RPC
-                          pageLength: 20, // Page length is now used by the RPC
+                          pageLength: 10, // Page length is now used by the RPC
                           primaryKeyColumns: const ['ente', 'struttura', 'email_principale'], // Define primary keys for row identification
                           rpcFunctionName: 'get_colleagues_by_struttura',
                           rpcFunctionParams: _resolvedRpcParams,

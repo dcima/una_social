@@ -3,7 +3,7 @@ import 'dart:async';
 
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social/helpers/logger_helper.dart';
+import 'package:una_social/helpers/logger_helper.dart'; // Import for ChangeNotifier if GoRouterRefreshStream is used with it
 
 class AuthController extends GetxController {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -15,6 +15,18 @@ class AuthController extends GetxController {
   final Rxn<bool> isSuperAdmin = Rxn<bool>();
   final RxBool isLoadingPermissions = false.obs;
   final RxInt connectedUsers = 0.obs;
+
+  // AGGIUNTO: Stato reattivo per indicare se l'utente è loggato
+  final _isLoggedIn = false.obs;
+  bool get isLoggedIn => _isLoggedIn.value;
+
+  // AGGIUNTO: Metodo per impostare lo stato di login, chiamato da main.dart
+  void setIsLoggedIn(bool value) {
+    if (_isLoggedIn.value != value) {
+      _isLoggedIn.value = value;
+      logInfo('[AuthController] Stato isLoggedIn aggiornato a: $value');
+    }
+  }
 
   // --- PROPRIETÀ PRIVATE ---
   RealtimeChannel? _onlineUsersChannel;
@@ -45,6 +57,9 @@ class AuthController extends GetxController {
 
     // A session exists (user is signed in, session restored, or token refreshed)
     if (session != null) {
+      // Imposta lo stato di login a true se c'è una sessione valida
+      setIsLoggedIn(true);
+
       // We only need to react when the user state actually changes.
       if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession || event == AuthChangeEvent.tokenRefreshed) {
         lastUserEmail = _supabase.auth.currentUser?.email;
@@ -53,10 +68,17 @@ class AuthController extends GetxController {
         _subscribeToOnlineUsers();
       }
       // No session exists (user signed out, or initial check found no session)
-    } else if (event == AuthChangeEvent.signedOut || event == AuthChangeEvent.initialSession) {
-      logInfo('[AuthController] No session. Clearing permissions and unsubscribing.');
-      clearUserPermissions();
-      _unsubscribeFromOnlineUsers();
+    } else {
+      // session == null
+      // Imposta lo stato di login a false se non c'è una sessione
+      setIsLoggedIn(false);
+
+      // We only need to react when the user state actually changes.
+      if (event == AuthChangeEvent.signedOut || event == AuthChangeEvent.initialSession) {
+        logInfo('[AuthController] No session. Clearing permissions and unsubscribing.');
+        clearUserPermissions();
+        _unsubscribeFromOnlineUsers();
+      }
     }
   }
 
@@ -109,8 +131,6 @@ class AuthController extends GetxController {
     _permissionsCompleter = null;
     logInfo('[AuthController] User permissions cleared.');
   }
-
-  // ... (the rest of the file remains the same as the previously corrected version) ...
 
   /// Internal function to call the RPC for Super Admin status.
   Future<bool> _fetchSuperAdminStatus() async {

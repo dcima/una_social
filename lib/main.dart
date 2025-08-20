@@ -5,8 +5,8 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social/app_router.dart';
-import 'package:una_social/controllers/auth_controller.dart';
+import 'package:una_social/app_router.dart'; // Assumendo che AppRouter gestisca GoRouter e il reindirizzamento
+import 'package:una_social/controllers/auth_controller.dart'; // Assumendo che AuthController gestisca lo stato di login
 import 'package:una_social/controllers/esterni_controller.dart';
 import 'package:una_social/controllers/personale_controller.dart';
 import 'package:una_social/controllers/profile_controller.dart';
@@ -19,7 +19,7 @@ Future<void> main() async {
   // --- MODIFICA CHIAVE: USARE runZonedGuarded ---
   // Questo crea una "zona" protetta per l'app. Il secondo parametro è un
   // gestore di errori globale che cattura tutte le eccezioni non gestite
-  // all'interno della zona, inclusa quella proveniente dal nostro stream.
+  // all'interno della zona.
   await runZonedGuarded<Future<void>>(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
@@ -37,6 +37,7 @@ Future<void> main() async {
         return;
       }
 
+      // Inizializza il client Supabase
       await Supabase.initialize(
         url: supabaseUrl,
         anonKey: supabaseAnonKey,
@@ -45,33 +46,49 @@ Future<void> main() async {
         ),
         debug: true,
       );
+      logInfo("Client Supabase inizializzato.");
 
-      logInfo("Client Supabase inizializzato. Avvio del monitoraggio dell'autenticazione...");
+      // Inizializza AuthController molto presto. Questo controller dovrebbe gestire lo stato di autenticazione.
+      final AuthController authController = Get.put(AuthController(), permanent: true);
+      logInfo("AuthController inizializzato.");
 
-      // Questo listener rimane attivo e gestisce i cambiamenti di stato
-      Supabase.instance.client.auth.onAuthStateChange.listen(
-        (data) {
-          final event = data.event;
-          logInfo("Evento Auth ricevuto in tempo reale: $event");
-          if (event == AuthChangeEvent.signedOut) {
-            logInfo("Sessione terminata. L'UI (gestita da AppRouter/AuthController) dovrebbe ora mostrare la schermata di login.");
-          }
-        },
-        // Il blocco onError viene ancora eseguito come prima
-        onError: (error) {
-          logError("ERRORE NEL FLUSSO DI AUTENTICAZIONE IN TEMPO REALE: $error");
-          if (error is AuthApiException && (error.message.contains('Invalid Refresh Token') || error.statusCode == '400')) {
-            logError("Refresh token non valido rilevato. La sessione locale è corrotta o è scaduta sul server. Eseguo il logout forzato per pulirla.");
-            Supabase.instance.client.auth.signOut();
-          }
-        },
-      );
+      // --- Critico: Gestione della validazione iniziale della sessione per ripartenze sporche ---
+      // Dopo Supabase.initialize, currentSession potrebbe non essere nullo anche se il refresh token non è valido.
+      // Tentiamo esplicitamente di rinfrescare la sessione per forzare la validazione.
+      try {
+        final Session? session = Supabase.instance.client.auth.currentSession;
+        if (session != null) {
+          logInfo("Sessione Supabase rilevata. Tentativo di ripristino/validazione esplicita...");
+          // Tentando di rinfrescare la sessione, verrà lanciata una AuthApiException se il refresh token non è valido/scaduto.
+          // Se ha successo, currentSession verrà aggiornato, o rimarrà lo stesso se valido.
+          await Supabase.instance.client.auth.refreshSession();
+          logInfo("Sessione Supabase validata/rinfrescata con successo.");
+          authController.setIsLoggedIn(true); // Assicurati che AuthController rifletta questo
+        } else {
+          logInfo("Nessuna sessione Supabase attiva all'avvio.");
+          authController.setIsLoggedIn(false); // Assicurati che AuthController rifletta questo
+        }
+      } on AuthApiException catch (e) {
+        // Questo cattura specificamente l'errore 'Invalid Refresh Token' o altri errori di autenticazione.
+        if (e.message.contains('Invalid Refresh Token') || e.statusCode == '400') {
+          logError("Refresh token non valido rilevato durante l'avvio: ${e.message}. Eseguo il logout forzato per pulire la cache.");
+          await Supabase.instance.client.auth.signOut(); // Pulisce lo storage locale e attiva l'evento signedOut
+          authController.setIsLoggedIn(false); // Assicurati che AuthController sappia che siamo disconnessi
+        } else {
+          // Rilancia altre AuthApiException che potrebbero indicare problemi diversi
+          logError("AuthApiException imprevista durante la validazione iniziale: ${e.message}", e);
+          await Supabase.instance.client.auth.signOut(); // Logout per sicurezza in caso di altri errori di autenticazione
+          authController.setIsLoggedIn(false);
+        }
+      } catch (e, s) {
+        // Cattura qualsiasi altro errore imprevisto durante la gestione iniziale della sessione
+        logError("Errore imprevisto durante la gestione iniziale della sessione: $e", e, s);
+        await Supabase.instance.client.auth.signOut(); // Forza il logout
+        authController.setIsLoggedIn(false);
+      }
 
-      // Aspettiamo solo lo stato iniziale per avviare l'UI
-      await Supabase.instance.client.auth.onAuthStateChange.first;
-      logInfo("Sincronizzazione autenticazione iniziale completata. Inizializzo i controller.");
-
-      Get.put(AuthController(), permanent: true);
+      // Ora che lo stato iniziale di autenticazione è stato gestito,
+      // inizializziamo gli altri controller.
       Get.put(PersonaleController(), permanent: true);
       Get.put(EsterniController(), permanent: true);
       Get.put(ProfileController(), permanent: true);
@@ -80,23 +97,23 @@ Future<void> main() async {
       logInfo("Avvio dell'interfaccia utente (MyApp)...");
       runApp(const MyApp());
     },
-    // --- GESTORE GLOBALE DEGLI ERRORI ---
+    // --- GESTORE GLOBALE DEGLO ERRORI ---
     (error, stack) {
-      // Qui intercettiamo l'errore prima che venga mostrato come "non gestito".
-      // Possiamo decidere di loggarlo in modo meno aggressivo.
+      // Questo gestore globale cattura tutti gli errori non gestiti nella zona.
+      // Per AuthApiException, assicuriamo un logout e lo logghiamo come info (poiché è "gestito" reindirizzando al login).
       if (error is AuthApiException) {
-        // Riconosciamo questo errore come "gestito" dalla nostra logica di sign-out.
-        // Lo logghiamo come INFO invece che come SEVERE per non spaventare.
-        logInfo("AuthApiException gestita a livello globale: ${error.message}");
+        logInfo("AuthApiException catturata a livello globale: ${error.message}. Tentativo di logout.");
+        // Assicurati che signOut sia chiamato. Questo si propagherà a AuthController tramite il suo listener.
+        // È importante non awaitare qui per non bloccare il gestore di errori.
+        Supabase.instance.client.auth.signOut();
       } else {
-        // Per tutti gli altri errori imprevisti, li logghiamo come critici.
+        // Per tutti gli altri errori inaspettati, loggali come critici.
         logError("ERRORE NON GESTITO A LIVELLO GLOBALE:", error, stack);
       }
     },
   );
 }
 
-// ... (il resto del file MyApp e SupabaseErrorApp rimane invariato) ...
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 

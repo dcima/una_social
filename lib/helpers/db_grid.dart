@@ -9,6 +9,7 @@ import 'package:una_social/helpers/db_grid_form_view.dart';
 import 'package:collection/collection.dart';
 import 'dart:convert';
 import 'dart:async';
+import 'package:universal_html/html.dart' as html; // Import per parsing HTML
 
 // --------------- ENUMS E CLASSI DI CONFIGURAZIONE ---------------
 enum SortDirection { asc, desc }
@@ -124,14 +125,13 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         if (mounted) setState(() {});
       },
       areMapsEqualCallback: _areMapsEqual,
-      // NEW: Callback for server-side sorting requests from DataGridSource
       onSortRequest: (sortColumns) {
         if (!mounted) return;
         setState(() {
           _sortedColumnsState.clear();
           if (sortColumns.isNotEmpty) {
             final sortCol = sortColumns.first;
-            _sortedColumnsState[sortCol.columnName] = sortCol.sortDirection;
+            _sortedColumnsState[sortCol.name] = sortCol.sortDirection;
           }
         });
         _fetchData(isRefresh: true);
@@ -191,7 +191,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       final offset = _currentPage * limit;
 
       if (widget.config.rpcFunctionName != null) {
-        appLogger.info('Calling RPC: ${widget.config.rpcFunctionName}');
+        //appLogger.info('Calling RPC: ${widget.config.rpcFunctionName}');
 
         // Prepare RPC parameters for pagination, sorting, and filtering
         final Map<String, dynamic> rpcParams = Map.from(widget.config.rpcFunctionParams ?? {});
@@ -227,7 +227,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           params: rpcParams,
         );
 
-        appLogger.info('RPC raw result: $rpcResult');
+        //appLogger.info('RPC raw result: $rpcResult');
 
         // Handle JSONB return type { "data": [...], "count": N }
         if (rpcResult is Map<String, dynamic> && rpcResult.containsKey('data') && rpcResult.containsKey('count')) {
@@ -249,7 +249,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         final PostgrestResponse<dynamic> response = await Supabase.instance.client.from(widget.config.dataSourceTable).select().range(offset, offset + limit - 1).count(CountOption.exact);
 
         _data = List<Map<String, dynamic>>.from(response.data ?? []);
-        _totalRecords = response.count ?? 0;
+        _totalRecords = response.count;
       }
 
       if (!mounted) return;
@@ -359,8 +359,11 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
-  List<GridColumn> _generateColumns(List<String> columnNames) {
+  // MODIFICATO: Logica per definire l'ordine delle colonne in modo rigido
+  List<GridColumn> _generateColumns(List<String> availableColumnNames) {
     List<GridColumn> cols = [];
+    Set<String> addedColumns = {}; // Per tenere traccia delle colonne già aggiunte
+
     if (widget.config.selectable) {
       cols.add(GridColumn(
           columnName: '_selector',
@@ -373,98 +376,145 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
             },
             tristate: true,
           )));
+      addedColumns.add('_selector');
     }
 
-    // Handle 'photo_url' column specifically
-    if (columnNames.contains('photo_url') && !widget.config.excludeColumns.contains('photo_url')) {
-      cols.add(GridColumn(
-        columnName: 'photo_url', // Use original column name for internal logic
-        label: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0), // Adjusted vertical padding
-          alignment: Alignment.centerLeft,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Foto', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)), // Display 'Foto' as header
-              if (widget.config.rpcFunctionName != null)
-                SizedBox(
-                  height: 24,
-                  child: TextField(
-                    controller: TextEditingController(text: _filterValues['photo_url']),
-                    decoration: InputDecoration(
-                      hintText: 'Filter',
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(4.0),
-                        borderSide: BorderSide.none,
+    // Ordine fisso desiderato per le prime colonne
+    final List<String> fixedOrderColumns = ['photo_url', 'cognome', 'nome', 'email_principale'];
+
+    // Aggiungi le colonne nell'ordine fisso desiderato
+    for (String colName in fixedOrderColumns) {
+      // Verifica se la colonna è disponibile nei dati e non è esclusa per la visualizzazione
+      if (availableColumnNames.contains(colName) && !widget.config.excludeColumns.contains(colName)) {
+        if (colName == 'photo_url') {
+          cols.add(GridColumn(
+            columnName: 'photo_url',
+            label: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+              alignment: Alignment.centerLeft,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Foto', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
+                  if (widget.config.rpcFunctionName != null)
+                    SizedBox(
+                      height: 24,
+                      child: TextField(
+                        controller: TextEditingController(text: _filterValues['photo_url']),
+                        decoration: InputDecoration(
+                          hintText: 'Filter',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(4.0),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Theme.of(context).cardColor,
+                        ),
+                        onChanged: (value) {
+                          _filterValues['photo_url'] = value;
+                          _debounceFilter();
+                        },
+                        onSubmitted: (value) {
+                          _fetchData(isRefresh: true);
+                        },
                       ),
-                      filled: true,
-                      fillColor: Theme.of(context).cardColor,
                     ),
-                    onChanged: (value) {
-                      _filterValues['photo_url'] = value;
-                      _debounceFilter();
-                    },
-                    onSubmitted: (value) {
-                      _fetchData(isRefresh: true);
-                    },
-                  ),
-                ),
-            ],
-          ),
-        ),
-        allowSorting: true,
-        width: 80, // Set a reasonable width for the photo column
-      ));
-      // Remove 'photo_url' from the list to avoid duplicate processing
-      columnNames.remove('photo_url');
-    }
-
-    // Process remaining columns
-    for (var name in columnNames) {
-      if (widget.config.excludeColumns.contains(name)) {
-        continue; // Ensure excluded columns are skipped
+                ],
+              ),
+            ),
+            allowSorting: true,
+            width: 80,
+          ));
+        } else {
+          cols.add(GridColumn(
+            columnName: colName,
+            label: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+              alignment: Alignment.centerLeft,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_formatHeader(colName), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
+                  if (widget.config.rpcFunctionName != null)
+                    SizedBox(
+                      height: 24,
+                      child: TextField(
+                        controller: TextEditingController(text: _filterValues[colName]),
+                        decoration: InputDecoration(
+                          hintText: 'Filter',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(4.0),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Theme.of(context).cardColor,
+                        ),
+                        onChanged: (value) {
+                          _filterValues[colName] = value;
+                          _debounceFilter();
+                        },
+                        onSubmitted: (value) {
+                          _fetchData(isRefresh: true);
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            allowSorting: true,
+          ));
+        }
+        addedColumns.add(colName); // Segna la colonna come aggiunta
       }
-      cols.add(GridColumn(
-        columnName: name,
-        label: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0), // Adjusted vertical padding
-          alignment: Alignment.centerLeft,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(_formatHeader(name), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
-              if (widget.config.rpcFunctionName != null)
-                SizedBox(
-                  height: 24,
-                  child: TextField(
-                    controller: TextEditingController(text: _filterValues[name]),
-                    decoration: InputDecoration(
-                      hintText: 'Filter',
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(4.0),
-                        borderSide: BorderSide.none,
+    }
+
+    // Aggiungi le rimanenti colonne (non nell'ordine fisso e non escluse)
+    for (var name in availableColumnNames) {
+      if (!addedColumns.contains(name) && !widget.config.excludeColumns.contains(name)) {
+        cols.add(GridColumn(
+          columnName: name,
+          label: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+            alignment: Alignment.centerLeft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_formatHeader(name), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
+                if (widget.config.rpcFunctionName != null)
+                  SizedBox(
+                    height: 24,
+                    child: TextField(
+                      controller: TextEditingController(text: _filterValues[name]),
+                      decoration: InputDecoration(
+                        hintText: 'Filter',
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(4.0),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: Theme.of(context).cardColor,
                       ),
-                      filled: true,
-                      fillColor: Theme.of(context).cardColor,
+                      onChanged: (value) {
+                        _filterValues[name] = value;
+                        _debounceFilter();
+                      },
+                      onSubmitted: (value) {
+                        _fetchData(isRefresh: true);
+                      },
                     ),
-                    onChanged: (value) {
-                      _filterValues[name] = value;
-                      _debounceFilter();
-                    },
-                    onSubmitted: (value) {
-                      _fetchData(isRefresh: true);
-                    },
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ),
-        allowSorting: true,
-      ));
+          allowSorting: true,
+        ));
+      }
     }
     return cols;
   }
@@ -483,44 +533,101 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     return text.replaceAll('_', ' ').split(' ').map((str) => str.isEmpty ? '' : '${str[0].toUpperCase()}${str.substring(1).toLowerCase()}').join(' ');
   }
 
+  // MODIFICATO: Logica per estrarre l'URL dell'immagine da HTML per 'photo_url'
+  // e per popolare le celle nell'ordine corretto.
   DataGridRow _buildRow(Map<String, dynamic> rowData, int rowIndex) {
     List<DataGridCell> cells = [];
+
+    // 1. Aggiungi la colonna selettore se configurata
     if (widget.config.selectable) {
       cells.add(DataGridCell<Map<String, dynamic>>(columnName: '_selector', value: rowData));
     }
-    rowData.forEach((key, value) {
-      // Exclude specified columns from rowData
-      if (widget.config.excludeColumns.contains(key) || key == '_selector') {
-        return;
+
+    // 2. Itera sulle _columns definite per garantire l'ordine corretto delle celle
+    for (var column in _columns) {
+      final String columnName = column.columnName;
+
+      // Salta la colonna selettore, è già stata aggiunta
+      if (columnName == '_selector') {
+        continue;
       }
 
-      if (key == 'photo_url') {
-        final String? photoUrl = value?.toString();
+      // Salta le colonne escluse dalla configurazione (dovrebbero già essere escluse da _generateColumns)
+      if (widget.config.excludeColumns.contains(columnName)) {
+        continue;
+      }
+
+      final dynamic value = rowData[columnName]; // Ottieni il valore dalla riga di dati usando il nome della colonna
+
+      if (columnName == 'photo_url') {
+        String? photoUrl = value?.toString();
+        String? finalImageUrl;
+
+        if (photoUrl != null && photoUrl.isNotEmpty) {
+          // Tenta di parsare come HTML se la stringa sembra HTML
+          if (photoUrl.trim().startsWith('<') && photoUrl.trim().endsWith('>') && photoUrl.contains('<img')) {
+            try {
+              final html.DomParser parser = html.DomParser();
+              final html.Document document = parser.parseFromString(photoUrl, 'text/html');
+              final html.ImageElement? imgElement = document.querySelector('img') as html.ImageElement?;
+              if (imgElement != null && imgElement.src != null) {
+                finalImageUrl = imgElement.src;
+                // Cruciale: decodifica l'entità HTML &amp; in & per un URL valido
+                finalImageUrl = finalImageUrl!.replaceAll('&amp;', '&');
+                appLogger.info("Parsed image URL from HTML: $finalImageUrl");
+              } else {
+                appLogger.warning("Could not find <img> tag or src in HTML string: $photoUrl");
+              }
+            } catch (e) {
+              appLogger.error("Error parsing HTML for photo_url: $e, original: $photoUrl");
+              // Fallback a interpretazione diretta se il parsing HTML fallisce
+              finalImageUrl = photoUrl;
+            }
+          } else {
+            // Se non è HTML, usalo direttamente
+            finalImageUrl = photoUrl;
+          }
+        }
+
         Widget imageWidget;
-        if (photoUrl != null && Uri.tryParse(photoUrl)?.hasAbsolutePath == true) {
-          imageWidget = Image.network(
-            photoUrl,
+        // Verifica se l'URL finale è valido e assoluto prima di tentare di caricarlo
+        if (finalImageUrl != null && Uri.tryParse(finalImageUrl)?.isAbsolute == true) {
+          // AGGIUNTO: Utilizzo di cors-anywhere.herokuapp.com come proxy
+          // e impostazione di un User-Agent per la richiesta.
+          final proxiedImageUrl = 'https://cors-anywhere.herokuapp.com/$finalImageUrl';
+          imageWidget = Image(
+            image: NetworkImage(
+              proxiedImageUrl,
+              headers: const {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.88 Safari/537.36',
+                // Potresti aggiungere altri header se il server unibo.it o il proxy li richiedono,
+                // ad esempio 'Referer': 'https://www.unibo.it/'
+              },
+            ),
             fit: BoxFit.cover,
-            width: 40, // Adjust size as needed
+            width: 40,
             height: 40,
-            errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, size: 40), // Placeholder on error
+            errorBuilder: (context, error, stackTrace) {
+              appLogger.warning("Error loading image from URL: $proxiedImageUrl, Error: $error");
+              return const Icon(Icons.person, size: 40); // Placeholder in caso di errore di caricamento
+            },
           );
         } else {
-          imageWidget = const Icon(Icons.person, size: 40); // Anonymous user icon
+          imageWidget = const Icon(Icons.person, size: 40); // Icona utente anonimo se URL non valido o mancante
         }
-        cells.add(DataGridCell<Widget>(columnName: key, value: imageWidget));
+        cells.add(DataGridCell<Widget>(columnName: columnName, value: imageWidget));
       }
-      // Special handling for List types (e.g., telefoni, ruoli, altre_emails)
+      // Gestione speciale per i tipi List (es. telefoni, ruoli, altre_emails)
       else if (value is List) {
-        if (key == 'telefoni') {
-          cells.add(DataGridCell<String>(columnName: key, value: (value).map((e) => e['v']?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
+        if (columnName == 'telefoni') {
+          cells.add(DataGridCell<String>(columnName: columnName, value: (value).map((e) => e['v']?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
         } else {
-          cells.add(DataGridCell<String>(columnName: key, value: (value).map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
+          cells.add(DataGridCell<String>(columnName: columnName, value: (value).map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
         }
       } else {
-        cells.add(DataGridCell<dynamic>(columnName: key, value: value));
+        cells.add(DataGridCell<dynamic>(columnName: columnName, value: value));
       }
-    });
+    }
     return DataGridRow(cells: cells);
   }
 
@@ -794,6 +901,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
               }
             }
           },
+          headerRowHeight: 70.0, // Increased height to accommodate header text and filter TextField
         ),
       ),
       _buildPaginationControls(),
@@ -809,7 +917,7 @@ class _DBGridDataSource extends DataGridSource {
   List<DataGridRow> _dataGridRows = [];
   final VoidCallback _onSelectionChanged;
   final bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) _areMapsEqualCallback;
-  final Function(List<SfDataGridSortColumn> sortColumns) _onSortRequest; // Corrected type
+  final Function(List<SortColumnDetails> sortColumns) _onSortRequest;
 
   _DBGridDataSource({
     required List<Map<String, dynamic>> gridData,
@@ -817,7 +925,7 @@ class _DBGridDataSource extends DataGridSource {
     required List<Map<String, dynamic>> selectedRowsDataMap,
     required VoidCallback onSelectionChanged,
     required bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) areMapsEqualCallback,
-    required Function(List<SfDataGridSortColumn> sortColumns) onSortRequest, // Corrected type
+    required Function(List<SortColumnDetails> sortColumns) onSortRequest,
   })  : _gridDataInternal = gridData,
         _buildRowCallback = buildRowCallback,
         _selectedRowsDataMap = selectedRowsDataMap,
@@ -934,8 +1042,7 @@ class _DBGridDataSource extends DataGridSource {
   Map<String, dynamic>? getSelectedDataForForm() => _selectedRowsDataMap.length == 1 ? _selectedRowsDataMap.first : null;
   List<Map<String, dynamic>> get selectedRowsData => List.unmodifiable(_selectedRowsDataMap);
 
-  @override
-  Future<void> handleDataGridSort(List<SfDataGridSortColumn> sortColumns) async {
+  Future<void> handleDataGridSort(List<SortColumnDetails> sortColumns) async {
     appLogger.debug("_DBGridDataSource.handleDataGridSort() called with: $sortColumns");
     _onSortRequest(sortColumns);
   }
