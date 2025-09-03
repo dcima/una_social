@@ -155,7 +155,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
       await FileSaver.instance.saveFile(
         name: fileName,
         bytes: bytes,
-        ext: fileExtension,
+        fileExtension: fileExtension,
         // file_saver inferisce il mimeType dall'estensione, ma puoi specificarlo
         // mimeType: MimeType.OTHER, // o MimeType.CSV, MimeType.JSON, etc.
       );

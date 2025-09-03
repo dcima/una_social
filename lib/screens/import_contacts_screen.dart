@@ -1,11 +1,17 @@
 // lib/src/features/import_contacts/presentation/import_contacts_screen.dart
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:go_router/go_router.dart';
 import 'package:una_social/app_router.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:una_social/controllers/auth_controller.dart';
 
 class ImportContactsScreen extends StatelessWidget {
-  const ImportContactsScreen({super.key});
+  ImportContactsScreen({super.key});
+  final AuthController authController = Get.find<AuthController>();
 
   @override
   Widget build(BuildContext context) {
@@ -31,29 +37,52 @@ class ImportContactsScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 32),
-                FilledButton.tonalIcon(
-                  icon: const Icon(Icons.school_outlined),
-                  label: const Text("Importa Colleghi dall'Università"),
-                  onPressed: () {
-                    // PUNTO 2: Qui viene richiamata la nuova schermata
-                    // che a sua volta eseguirà 'get-colleagues'
-                    context.goNamed(AppRoute.colleghi.name);
-                  },
-                  style: _buttonStyle(theme),
+                Visibility(
+                  visible: authController.isPersonale == true ? true : false,
+                  child: const SizedBox(height: 32),
+                ),
+                Visibility(
+                  visible: authController.isPersonale == true ? true : false,
+                  child: FilledButton.tonalIcon(
+                    icon: const Icon(Icons.school_outlined),
+                    key: const Key('import_university_colleghi_button'),
+                    label: const Text("Importa Colleghi dall'Università"),
+                    onPressed: () {
+                      context.goNamed(AppRoute.colleghi.name);
+                    },
+                    style: _buttonStyle(theme),
+                  ),
+                ),
+                Visibility(
+                  visible: (kIsWeb || Platform.isMacOS || Platform.isWindows || Platform.isLinux) ? false : true,
+                  child: const SizedBox(height: 16),
+                ),
+                Visibility(
+                  visible: (kIsWeb || Platform.isMacOS || Platform.isWindows || Platform.isLinux) ? false : true,
+                  child: FilledButton.tonalIcon(
+                    icon: Icon(Icons.contact_phone_outlined),
+                    key: Key('import_phone_contacts_button'),
+                    label: Text('Invita dalla Rubrica del Telefono'),
+                    onPressed: () {
+                      // Logica per invitare da rubrica telefono
+                    },
+                    style: _buttonStyle(theme),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
-                  icon: const Icon(Icons.contact_phone_outlined),
-                  label: const Text('Invita dalla Rubrica del Telefono'),
+                  icon: const Icon(Icons.email_outlined),
+                  key: const Key('import_csv_contacts_button'),
+                  label: const Text('Importa contatti CSV'),
                   onPressed: () {
-                    // Logica per invitare da rubrica telefono
+                    // Logica per importare contatti CSV
                   },
                   style: _buttonStyle(theme),
                 ),
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
                   icon: const Icon(Icons.email_outlined),
+                  key: const Key('import_email_contacts_button'),
                   label: const Text('Invita tramite Email'),
                   onPressed: () {
                     // Logica per invitare via email

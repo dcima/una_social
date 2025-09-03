@@ -23,38 +23,40 @@ class SortColumn {
 }
 
 class DBGridConfig {
-  final String dataSourceTable;
-  final String? rpcFunctionName;
-  final Map<String, dynamic>? rpcFunctionParams;
-  final int pageLength;
-  final bool showHeader;
-  final int fixedColumnsCount;
   final bool selectable;
-  final String emptyDataMessage;
+  final bool showHeader;
+  final Function(UIMode newMode)? onViewModeChanged;
+  final int fixedColumnsCount;
+  final int pageLength;
+  final List<GridColumn> columns;
   final List<SortColumn> initialSortBy;
+  final List<String> excludeColumns;
+  final List<String> primaryKeyColumns;
   final List<UIMode> uiModes;
+  final Map<String, dynamic>? rpcFunctionParams;
+  final String dataSourceTable;
+  final String emptyDataMessage;
   final String? formHookName;
   final String? mapHookName;
-  final Function(UIMode newMode)? onViewModeChanged;
-  final List<String> primaryKeyColumns;
-  final List<String> excludeColumns; // Columns to exclude from grid display
+  final String? rpcFunctionName;
 
   DBGridConfig({
     required this.dataSourceTable,
-    this.rpcFunctionName,
-    this.rpcFunctionParams,
-    this.pageLength = 25,
-    this.showHeader = true,
-    this.fixedColumnsCount = 0,
-    this.selectable = false,
+    required this.columns,
     this.emptyDataMessage = "Nessun dato disponibile.",
-    this.initialSortBy = const [],
-    this.uiModes = const [UIMode.grid],
+    this.excludeColumns = const [],
+    this.fixedColumnsCount = 0,
     this.formHookName,
+    this.initialSortBy = const [],
     this.mapHookName,
     this.onViewModeChanged,
+    this.pageLength = 25,
     this.primaryKeyColumns = const ['id'],
-    this.excludeColumns = const [], // Default to empty list for backward compatibility
+    this.rpcFunctionName,
+    this.rpcFunctionParams,
+    this.selectable = false,
+    this.showHeader = true,
+    this.uiModes = const [UIMode.grid],
   }) : assert(pageLength > 0, 'pageLength must be greater than 0');
 }
 
@@ -118,10 +120,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     _currentUIMode = widget.config.uiModes.isNotEmpty ? widget.config.uiModes.first : UIMode.grid;
     _initializeSortedColumns();
 
-    // Initialize filter controllers for all potentially filterable columns
-    // including those in fixedOrderColumns and any other dynamic columns.
-    // It's safer to initialize them all at once or dynamically as columns are generated.
-    // Here, we initialize for the fixed columns. Other columns will be putIfAbsent in _generateColumns.
     final List<String> initialFilterableColumns = ['photo_url', 'cognome', 'nome', 'email_principale'];
     for (var colName in initialFilterableColumns) {
       _filterControllers[colName] = TextEditingController();
@@ -147,7 +145,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         });
         _fetchData(isRefresh: true); // Trigger full refresh on sort change
       },
-      // Pass the widget's _fetchData method to the DataSource for handleLoadMoreRows
       fetchDataCallback: (isRefresh) => _fetchData(isRefresh: isRefresh),
     );
 
@@ -161,9 +158,44 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     super.dispose();
   }
 
+  // FUNZIONE AGGIORNATA: Genera un URL proxy per l'immagine per aggirare i problemi CORS
+  String getProxiedImageUrl(String originalPhotoUrl) {
+    // Utilizziamo Supabase.instance.client.rest.url per ottenere un URL che contiene il project-ref
+    // Sarà qualcosa come 'http://<IP_O_DOMINIO_DEL_TUO_SERVER>:8000/rest/v1'
+    final restBaseUrl = Supabase.instance.client.rest.url;
+
+    // Controlla se l'URL è nullo o vuoto prima di tentare di analizzarlo
+    if (restBaseUrl.isEmpty) {
+      appLogger.error('Supabase REST URL is null or empty, cannot generate proxied image URL. Falling back to original.');
+      return originalPhotoUrl; // Fallback to original if base URL not available
+    }
+
+    final uri = Uri.parse(restBaseUrl);
+    final host = uri.host; // e.g., '192.168.1.100' or 'localhost'
+    final port = uri.port; // e.g., '8000'
+
+    // Per un setup Docker, il "projectRef" è l'host:porta
+    final projectRef = '$host:$port';
+
+    // Aggiungi logging qui per verificare i valori estratti
+    appLogger.info('DEBUG: REST Base URL: $restBaseUrl');
+    appLogger.info('DEBUG: Host from URL: $host');
+    appLogger.info('DEBUG: Port from URL: $port');
+    appLogger.info('DEBUG: Project Ref extracted (for Docker): $projectRef');
+
+    // Costruiamo l'URL completo della nostra Edge Function 'image-proxy'
+    // Nota: per le Edge Functions su Docker, l'URL è tipicamente <host>:<port>/functions/v1/<nome_funzione>
+    final proxyBaseUrl = 'https://$projectRef/functions/v1/image-proxy';
+
+    // Codifica l'URL originale dell'immagine e lo aggiunge come parametro alla Edge Function
+    final fullProxiedUrl = '$proxyBaseUrl?url=${Uri.encodeComponent(originalPhotoUrl)}';
+    appLogger.info('DEBUG: Generated Proxied URL: $fullProxiedUrl');
+
+    return fullProxiedUrl;
+  }
+
   // Centralized map comparison logic
   bool _areMapsEqual(Map<String, dynamic> map1, Map<String, dynamic> map2) {
-    // Attempt to use primary keys for comparison first
     if (widget.config.primaryKeyColumns.isNotEmpty) {
       bool allPkMatch = true;
       for (String pkCol in widget.config.primaryKeyColumns) {
@@ -172,10 +204,9 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           break;
         }
       }
-      if (allPkMatch) return true; // If all primary keys match, consider them equal
+      if (allPkMatch) return true;
     }
 
-    // Fallback to full map comparison if no primary keys or PKs don't match
     if (map1.length != map2.length) return false;
     for (var key in map1.keys) {
       if (!map2.containsKey(key) || map1[key] != map2[key]) {
@@ -190,18 +221,16 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
     if (isRefresh) {
       _currentPage = 0;
-      _data.clear(); // Clear existing data on full refresh/filter change
+      _data.clear();
       _dataSource.clearSelections();
-      _currentFormRecordIndex = -1; // Reset form index on full refresh
+      _currentFormRecordIndex = -1;
     } else {
-      // For infinite scroll, increment page before fetching
       _currentPage++;
     }
 
-    // Prevent fetching if all records are already loaded (for infinite scroll)
     if (_data.isNotEmpty && _data.length >= _totalRecords && !isRefresh) {
       appLogger.info("All records already loaded. Not fetching more.");
-      setState(() => _isLoading = false); // Ensure loading state is false
+      setState(() => _isLoading = false);
       return;
     }
 
@@ -214,15 +243,13 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       final int limit = widget.config.pageLength;
       final int offset = _currentPage * limit;
 
-      dynamic rpcResult; // Declare rpcResult here to ensure scope
+      dynamic rpcResult;
 
       if (widget.config.rpcFunctionName != null) {
-        // Prepare RPC parameters for pagination, sorting, and filtering
         final Map<String, dynamic> rpcParams = Map.from(widget.config.rpcFunctionParams ?? {});
         rpcParams['p_limit'] = limit;
         rpcParams['p_offset'] = offset;
 
-        // Add sorting parameters
         final sortedColumn = _sortedColumnsState.entries.firstOrNull;
         if (sortedColumn != null) {
           rpcParams['p_order_by'] = sortedColumn.key;
@@ -232,7 +259,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           rpcParams['p_order_direction'] = widget.config.initialSortBy.isNotEmpty && widget.config.initialSortBy.first.direction == SortDirection.desc ? 'desc' : 'asc';
         }
 
-        // Add filtering parameters (supports only one active filter for simplicity with current RPC)
         final activeFilter = _filterValues.entries.firstWhereOrNull((e) => e.value.isNotEmpty);
         if (activeFilter != null) {
           rpcParams['p_filter_column'] = activeFilter.key;
@@ -249,22 +275,20 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           params: rpcParams,
         );
 
-        // Handle JSONB return type { "data": [...], "count": N }
         if (rpcResult is Map<String, dynamic> && rpcResult.containsKey('data') && rpcResult.containsKey('count')) {
           _data.addAll(List<Map<String, dynamic>>.from(rpcResult['data'] ?? []));
-          _totalRecords = (rpcResult['count'] as num?)?.toInt() ?? 0; // Safe cast from num to int
+          _totalRecords = (rpcResult['count'] as num?)?.toInt() ?? 0;
         } else if (rpcResult is List) {
           _data.addAll(List<Map<String, dynamic>>.from(rpcResult));
-          _totalRecords = _data.length; // Fallback: assume all data returned if not JSONB
+          _totalRecords = _data.length;
           appLogger.warning('RPC did not return expected JSONB with data and count. Assuming all data returned.');
         } else if (rpcResult != null) {
           _data.add(Map<String, dynamic>.from(rpcResult));
           _totalRecords = 1;
         } else {
-          _totalRecords = _data.length; // No new data added, total remains current size
+          _totalRecords = _data.length;
         }
       } else {
-        // --- Standard table selection (existing logic, not ideal for infinite scroll without count from select) ---
         final PostgrestResponse<dynamic> response = await Supabase.instance.client.from(widget.config.dataSourceTable).select().range(offset, offset + limit - 1).count(CountOption.exact);
 
         _data.addAll(List<Map<String, dynamic>>.from(response.data ?? []));
@@ -273,7 +297,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
       if (!mounted) return;
 
-      // Decode JSONB strings for newly added/refreshed data
       final int startIndexForDecoding = isRefresh ? 0 : _data.length - (rpcResult is Map && rpcResult.containsKey('data') ? ((rpcResult['data']?.length ?? 0) as num).toInt() : (rpcResult is List ? rpcResult.length.toInt() : 0));
       for (int i = startIndexForDecoding; i < _data.length; i++) {
         final Map<String, dynamic> row = _data[i];
@@ -295,10 +318,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           return null;
         }
 
-        newRow['telefoni'] = decodeJsonbList(newRow['telefoni'], 'telefoni');
-        newRow['ruoli'] = decodeJsonbList(newRow['ruoli'], 'ruoli');
-        newRow['altre_emails'] = decodeJsonbList(newRow['altre_emails'], 'altre_emails');
-        _data[i] = newRow; // Update the row in the main list
+        _data[i] = newRow;
       }
 
       if (_data.isEmpty && _totalRecords == 0 && _errorMessage.isEmpty) {
@@ -314,7 +334,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         }
       }
 
-      // Handle column regeneration (includes exclusion)
       bool needsColumnRegeneration = _columns.isEmpty || isRefresh;
       if (!needsColumnRegeneration && _data.isNotEmpty) {
         final currentDataKeys = _data.first.keys.where((key) => !widget.config.excludeColumns.contains(key)).toList();
@@ -333,7 +352,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
       _dataSource.updateDataGridSource(_data);
 
-      // Logic for form mode (remains unchanged)
       if (_currentUIMode == UIMode.form && _data.isNotEmpty) {
         final Map<String, dynamic>? previouslySelected = _dataSource.getSelectedDataForForm();
         if (previouslySelected != null) {
@@ -370,15 +388,10 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
-  // NEW: Callback for SfDataGrid's onLoadMoreRows
-  // This method is called by SfDataGrid's internal mechanism when it needs more rows.
   Future<void> handleLoadMoreRows() async {
-    // This method is called by SfDataGrid when it needs more rows.
-    // It should trigger fetching more data in the widget state.
-    // The _fetchData method already contains the logic to check if more data is available.
     if (_data.length < _totalRecords && !_isLoading) {
       appLogger.info("SfDataGrid onLoadMoreRows triggered. Current data length: ${_data.length}, Total records: $_totalRecords");
-      await _fetchData(isRefresh: false); // Fetch more data, append to existing
+      await _fetchData(isRefresh: false);
     } else {
       appLogger.info("SfDataGrid onLoadMoreRows skipped. All data loaded or currently loading.");
     }
@@ -395,6 +408,8 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     List<GridColumn> cols = [];
     Set<String> addedColumns = {};
 
+    final Map<String, GridColumn> userDefinedColumns = {for (var col in widget.config.columns) col.columnName: col};
+
     if (widget.config.selectable) {
       cols.add(GridColumn(
           columnName: '_selector',
@@ -410,69 +425,75 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       addedColumns.add('_selector');
     }
 
-    final List<String> fixedOrderColumns = ['photo_url', 'cognome', 'nome', 'email_principale'];
+    Widget buildColumnLabel(String colName, GridColumn? userColumn) {
+      _filterControllers.putIfAbsent(colName, () => TextEditingController());
+      _filterValues.putIfAbsent(colName, () => '');
 
-    for (String colName in fixedOrderColumns) {
-      if (availableColumnNames.contains(colName) && !widget.config.excludeColumns.contains(colName)) {
-        // Ensure controller exists for this column. If not, create it.
-        _filterControllers.putIfAbsent(colName, () => TextEditingController());
-        _filterValues.putIfAbsent(colName, () => '');
-
-        cols.add(GridColumn(
-          columnName: colName,
-          label: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-            alignment: Alignment.centerLeft,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_formatHeader(colName), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
-                if (widget.config.rpcFunctionName != null)
-                  SizedBox(
-                    height: 24,
-                    child: TextField(
-                      controller: _filterControllers[colName],
-                      decoration: InputDecoration(
-                        hintText: 'Filter',
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(4.0),
-                          borderSide: BorderSide.none,
-                        ),
-                        filled: true,
-                        fillColor: Theme.of(context).cardColor,
-                        suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                          valueListenable: _filterControllers[colName]!,
-                          builder: (context, value, child) {
-                            return value.text.isNotEmpty
-                                ? IconButton(
-                                    icon: const Icon(Icons.clear, size: 16),
-                                    onPressed: () {
-                                      _filterControllers[colName]!.clear();
-                                      _filterValues[colName] = '';
-                                      _fetchData(isRefresh: true);
-                                    },
-                                  )
-                                : const SizedBox.shrink();
-                          },
-                        ),
-                      ),
-                      onChanged: (value) {
-                        _filterValues[colName] = value;
-                        _debounceFilter();
-                      },
-                      onSubmitted: (value) {
-                        _fetchData(isRefresh: true);
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+        alignment: Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              userColumn?.label != null && userColumn!.label is Text ? (userColumn.label as Text).data! : _formatHeader(colName),
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            if (widget.config.rpcFunctionName != null)
+              SizedBox(
+                height: 24,
+                child: TextField(
+                  controller: _filterControllers[colName],
+                  decoration: InputDecoration(
+                    hintText: 'Filter',
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(4.0),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: Theme.of(context).cardColor,
+                    suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: _filterControllers[colName]!,
+                      builder: (context, value, child) {
+                        return value.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 16),
+                                onPressed: () {
+                                  _filterControllers[colName]!.clear();
+                                  _filterValues[colName] = '';
+                                  _fetchData(isRefresh: true);
+                                },
+                              )
+                            : const SizedBox.shrink();
                       },
                     ),
                   ),
-              ],
-            ),
-          ),
-          allowSorting: true,
-          // Set width for photo_url; other columns will be handled by ColumnWidthMode.fill if width is null
-          width: colName == 'photo_url' ? 80 : 0,
+                  onChanged: (value) {
+                    _filterValues[colName] = value;
+                    _debounceFilter();
+                  },
+                  onSubmitted: (value) {
+                    _fetchData(isRefresh: true);
+                  },
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    for (GridColumn userColumn in widget.config.columns) {
+      final String colName = userColumn.columnName;
+      if (availableColumnNames.contains(colName) && !widget.config.excludeColumns.contains(colName)) {
+        cols.add(GridColumn(
+          columnName: userColumn.columnName,
+          label: buildColumnLabel(colName, userColumn),
+          allowSorting: userColumn.allowSorting,
+          width: userColumn.width,
+          columnWidthMode: userColumn.columnWidthMode,
         ));
         addedColumns.add(colName);
       }
@@ -480,64 +501,13 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
     for (var name in availableColumnNames) {
       if (!addedColumns.contains(name) && !widget.config.excludeColumns.contains(name)) {
-        // Ensure controller exists for this column. If not, create it.
-        _filterControllers.putIfAbsent(name, () => TextEditingController());
-        _filterValues.putIfAbsent(name, () => '');
-
         cols.add(GridColumn(
           columnName: name,
-          label: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-            alignment: Alignment.centerLeft,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_formatHeader(name), overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
-                if (widget.config.rpcFunctionName != null)
-                  SizedBox(
-                    height: 24,
-                    child: TextField(
-                      controller: _filterControllers[name],
-                      decoration: InputDecoration(
-                        hintText: 'Filter',
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(4.0),
-                          borderSide: BorderSide.none,
-                        ),
-                        filled: true,
-                        fillColor: Theme.of(context).cardColor,
-                        suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                          valueListenable: _filterControllers[name]!,
-                          builder: (context, value, child) {
-                            return value.text.isNotEmpty
-                                ? IconButton(
-                                    icon: const Icon(Icons.clear, size: 16),
-                                    onPressed: () {
-                                      _filterControllers[name]!.clear();
-                                      _filterValues[name] = '';
-                                      _fetchData(isRefresh: true);
-                                    },
-                                  )
-                                : const SizedBox.shrink();
-                          },
-                        ),
-                      ),
-                      onChanged: (value) {
-                        _filterValues[name] = value;
-                        _debounceFilter();
-                      },
-                      onSubmitted: (value) {
-                        _fetchData(isRefresh: true);
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
+          label: buildColumnLabel(name, null),
           allowSorting: true,
+          columnWidthMode: ColumnWidthMode.fill,
         ));
+        addedColumns.add(name);
       }
     }
     return cols;
@@ -548,7 +518,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       _filterDebounce!.cancel();
     }
     _filterDebounce = Timer(const Duration(milliseconds: 500), () {
-      _fetchData(isRefresh: true); // Trigger full refresh when filter changes
+      _fetchData(isRefresh: true);
     });
   }
 
@@ -600,19 +570,14 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
         Widget imageWidget;
         if (finalImageUrl != null && Uri.tryParse(finalImageUrl)?.isAbsolute == true) {
-          final proxiedImageUrl = 'https://cors-anywhere.herokuapp.com/$finalImageUrl';
+          final proxiedImageUrl = getProxiedImageUrl(finalImageUrl);
           imageWidget = Image(
-            image: NetworkImage(
-              proxiedImageUrl,
-              headers: const {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.88 Safari/537.36',
-              },
-            ),
+            image: NetworkImage(proxiedImageUrl),
             fit: BoxFit.cover,
             width: 40,
             height: 40,
             errorBuilder: (context, error, stackTrace) {
-              appLogger.warning("Error loading image from URL: $proxiedImageUrl, Error: $error");
+              appLogger.error('Error loading proxied image from $proxiedImageUrl: $error');
               return const Icon(Icons.person, size: 40);
             },
           );
@@ -742,17 +707,13 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
   @override
   Widget build(BuildContext context) {
-    // Adjusted initial loading/error checks
     if (_isLoading && _data.isEmpty && _errorMessage.isEmpty) {
-      // Initial loading, no data yet
       return const Center(child: CircularProgressIndicator());
     }
     if (_errorMessage.isNotEmpty && _data.isEmpty) {
-      // Initial error, no data loaded
       return Center(child: Text(_errorMessage, style: const TextStyle(color: Colors.red)));
     }
     if (!_isLoading && _data.isEmpty && _errorMessage.isEmpty) {
-      // No data, not loading, no error means empty message
       return Center(child: Text(widget.config.emptyDataMessage));
     }
 
@@ -785,6 +746,50 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         return Center(
             child: Column(
                 mainAxisAlignment: MainAxisAlignment.center, children: [Text("Map View (Not Implemented for ${widget.config.dataSourceTable})"), const SizedBox(height: 20), ElevatedButton(onPressed: _toggleUIMode, child: const Text("Back to Grid"))]));
+    }
+  }
+
+  Widget getMoreRows(BuildContext context, LoadMoreRows loadMoreRows) {
+    if (_data.length >= _totalRecords && _totalRecords > 0) {
+      return Container(
+        height: 50.0,
+        alignment: Alignment.center,
+        child: Text('Tutti i $_totalRecords record caricati.', textAlign: TextAlign.center),
+      );
+    } else if (_isLoading) {
+      return Container(
+        height: 50.0,
+        alignment: Alignment.center,
+        child: const CircularProgressIndicator(strokeWidth: 2),
+      );
+    } else {
+      return FutureBuilder<void>(
+        future: loadMoreRows(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Container(
+              height: 50.0,
+              alignment: Alignment.center,
+              child: const CircularProgressIndicator(strokeWidth: 2),
+            );
+          } else if (snapshot.hasError) {
+            appLogger.error("Error in loadMoreViewBuilder: ${snapshot.error}");
+            return Container(
+              height: 50.0,
+              alignment: Alignment.center,
+              child: Text('Errore caricamento dati: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
+            );
+          } else if (_data.length < _totalRecords) {
+            return Container(
+              height: 50.0,
+              alignment: Alignment.center,
+              child: Text('Scorri per caricare altri ${_totalRecords - _data.length} record (su $_totalRecords totali).', textAlign: TextAlign.center),
+            );
+          } else {
+            return const SizedBox.shrink();
+          }
+        },
+      );
     }
   }
 
@@ -822,17 +827,18 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
             )),
       Expanded(
         child: SfDataGrid(
-          key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_')),
-          source: _dataSource,
-          columns: _columns,
-          controller: _dataGridController,
+          allowColumnsResizing: true,
           allowSorting: true,
-          selectionMode: widget.config.selectable ? SelectionMode.multiple : SelectionMode.single,
-          navigationMode: GridNavigationMode.cell,
+          columns: _columns,
+          columnWidthMode: ColumnWidthMode.fill,
+          controller: _dataGridController,
           frozenColumnsCount: widget.config.fixedColumnsCount + (widget.config.selectable ? 1 : 0),
           gridLinesVisibility: GridLinesVisibility.both,
           headerGridLinesVisibility: GridLinesVisibility.both,
-          columnWidthMode: ColumnWidthMode.fill,
+          headerRowHeight: 70.0,
+          key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_')),
+          loadMoreViewBuilder: (BuildContext context, LoadMoreRows loadMoreRows) => getMoreRows(context, loadMoreRows),
+          navigationMode: GridNavigationMode.cell,
           onCellDoubleTap: _handleRowDoubleTap,
           onCellTap: (DataGridCellTapDetails details) {
             final int rowIndex = details.rowColumnIndex.rowIndex;
@@ -843,65 +849,10 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
               }
             }
           },
-          headerRowHeight: 70.0,
-          // NEW: Infinite scroll configuration
-          loadMoreViewBuilder: (BuildContext context, LoadMoreRows loadMoreRows) {
-            // This builder will display the loading indicator or status message.
-            // The `loadMoreRows` function is the one provided by SfDataGrid
-            // that you call to trigger loading more data.
-            // We'll call it within a FutureBuilder to manage the async call.
-
-            if (_data.length >= _totalRecords && _totalRecords > 0) {
-              // All data loaded
-              return Container(
-                height: 50.0,
-                alignment: Alignment.center,
-                child: Text('Tutti i $_totalRecords record caricati.', textAlign: TextAlign.center),
-              );
-            } else if (_isLoading) {
-              // Currently loading (either initial or more data)
-              return Container(
-                height: 50.0,
-                alignment: Alignment.center,
-                child: const CircularProgressIndicator(strokeWidth: 2),
-              );
-            } else {
-              // Not loading, but more data is available.
-              // Trigger `loadMoreRows` automatically if it's not already loading.
-              // Using FutureBuilder to ensure it's triggered once per visibility and manages its internal future.
-              return FutureBuilder<void>(
-                future: loadMoreRows(), // Call the provided loadMoreRows function
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return Container(
-                      height: 50.0,
-                      alignment: Alignment.center,
-                      child: const CircularProgressIndicator(strokeWidth: 2),
-                    );
-                  } else if (snapshot.hasError) {
-                    appLogger.error("Error in loadMoreViewBuilder: ${snapshot.error}");
-                    return Container(
-                      height: 50.0,
-                      alignment: Alignment.center,
-                      child: Text('Errore caricamento dati: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
-                    );
-                  } else if (_data.length < _totalRecords) {
-                    return Container(
-                      height: 50.0,
-                      alignment: Alignment.center,
-                      child: Text('Scorri per caricare altri ${_totalRecords - _data.length} record (su $_totalRecords totali).', textAlign: TextAlign.center),
-                    );
-                  } else {
-                    return const SizedBox.shrink(); // All data loaded or other state
-                  }
-                },
-              );
-            }
-          },
+          selectionMode: widget.config.selectable ? SelectionMode.multiple : SelectionMode.single,
+          source: _dataSource,
         ),
       ),
-      // The external loading indicators and status texts are now managed within loadMoreViewBuilder.
-      // Removed previous conditional Padding widgets.
     ]);
   }
 }
@@ -915,7 +866,6 @@ class _DBGridDataSource extends DataGridSource {
   final VoidCallback _onSelectionChanged;
   final bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) _areMapsEqualCallback;
   final Function(List<SortColumnDetails> sortColumns) _onSortRequest;
-  // NEW: Callback to trigger data fetching in the StatefulWidget
   final Function(bool isRefresh)? fetchDataCallback;
 
   _DBGridDataSource({
@@ -925,7 +875,7 @@ class _DBGridDataSource extends DataGridSource {
     required VoidCallback onSelectionChanged,
     required bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) areMapsEqualCallback,
     required Function(List<SortColumnDetails> sortColumns) onSortRequest,
-    this.fetchDataCallback, // Initialize the callback
+    this.fetchDataCallback,
   })  : _gridDataInternal = gridData,
         _buildRowCallback = buildRowCallback,
         _selectedRowsDataMap = selectedRowsDataMap,
@@ -933,6 +883,17 @@ class _DBGridDataSource extends DataGridSource {
         _areMapsEqualCallback = areMapsEqualCallback,
         _onSortRequest = onSortRequest {
     _buildDataGridRows();
+  }
+
+  void handleRowSelection(Map<String, dynamic> rowData, {bool isSelected = true}) {
+    if (isSelected) {
+      _selectedRowsDataMap.clear();
+      _selectedRowsDataMap.add(Map.from(rowData));
+    } else {
+      _selectedRowsDataMap.removeWhere((item) => _areMapsEqualCallback(item, rowData));
+    }
+    notifyListeners();
+    _onSelectionChanged();
   }
 
   @override
@@ -971,16 +932,15 @@ class _DBGridDataSource extends DataGridSource {
             return Checkbox(
               value: isSelected,
               onChanged: (bool? value) {
-                if (originalData != null) handleRowSelection(originalData, isSelected: value);
+                if (originalData != null) handleRowSelection(originalData, isSelected: value ?? false);
               },
             );
           }
           if (dataGridCell.columnName == 'photo_url' && dataGridCell.value is Widget) {
             return Container(
-              alignment: Alignment.center, // Center the image
-              padding: const EdgeInsets.all(4.0), // Small padding for the image
+              alignment: Alignment.center,
+              padding: const EdgeInsets.all(4.0),
               child: ClipOval(
-                // Clip the image to a circle
                 child: dataGridCell.value as Widget,
               ),
             );
@@ -1019,19 +979,6 @@ class _DBGridDataSource extends DataGridSource {
     _onSelectionChanged();
   }
 
-  void handleRowSelection(Map<String, dynamic> rowData, {bool? isSelected}) {
-    final bool currentlySelected = _selectedRowsDataMap.any((item) => _areMapsEqualCallback(item, rowData));
-    final bool shouldBeSelected = isSelected ?? !currentlySelected;
-
-    if (shouldBeSelected) {
-      if (!currentlySelected) _selectedRowsDataMap.add(Map.from(rowData));
-    } else {
-      _selectedRowsDataMap.removeWhere((item) => _areMapsEqualCallback(item, rowData));
-    }
-    notifyListeners();
-    _onSelectionChanged();
-  }
-
   void clearSelections() {
     _selectedRowsDataMap.clear();
     notifyListeners();
@@ -1046,12 +993,11 @@ class _DBGridDataSource extends DataGridSource {
     _onSortRequest(sortColumns);
   }
 
-  // Override the handleLoadMoreRows method from DataGridSource
   @override
   Future<void> handleLoadMoreRows() async {
-    // This method is called by the DataGrid's loadMoreViewBuilder mechanism.
-    // It should trigger the actual data fetching in the StatefulWidget.
-    fetchDataCallback?.call(false); // Call the callback with isRefresh: false
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      fetchDataCallback?.call(false);
+    });
   }
 }
 

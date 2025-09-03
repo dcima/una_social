@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_chat/screens/una_chat_main_screen.dart';
 // NOTA: Usa i percorsi relativi corretti per il tuo progetto
 import 'package:una_social/screens/colleghi_screen.dart';
+import 'package:una_social/screens/database/strutture.dart';
 import 'package:una_social/screens/database_screen.dart';
 import 'package:una_social/screens/database/ambiti.dart';
 import 'package:una_social/screens/database/campus.dart';
@@ -19,11 +20,11 @@ import 'package:una_social/screens/import_contacts_screen.dart';
 import 'package:una_social/screens/login_screen.dart';
 import 'package:una_social/screens/set_password_screen.dart';
 import 'package:una_social/screens/splash_screen.dart';
-import 'package:una_social/screens/strutture_screen.dart';
 
 // Controller Imports
 import 'package:una_social/controllers/auth_controller.dart';
 import 'package:una_social/controllers/profile_controller.dart';
+import 'package:una_social/controllers/ui_controller.dart';
 
 // Helper Imports
 import 'package:una_social/helpers/logger_helper.dart';
@@ -31,6 +32,7 @@ import 'package:una_social/helpers/logger_helper.dart';
 final _supabase = Supabase.instance.client;
 final AuthController authController = Get.find<AuthController>();
 final ProfileController profileController = Get.find<ProfileController>();
+final UiController uiController = Get.put<UiController>(UiController());
 
 class GoRouterRefreshStream extends ChangeNotifier {
   late final StreamSubscription<AuthState> _subscription;
@@ -73,15 +75,51 @@ class AppRouter {
   ];
 
   static final List<GoRoute> superAdminRoutes = [
-    GoRoute(path: '/app/database', name: 'database', builder: (context, state) => HomeScreen(screenName: "Database", child: DatabaseScreen()), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(path: '/app/ambiti', name: 'ambiti', builder: (context, state) => HomeScreen(screenName: "Ambiti", child: AmbitiScreen()), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(path: '/app/campus', name: 'campus', builder: (context, state) => HomeScreen(screenName: "Campus", child: CampusScreen()), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(
+        path: '/app/ambiti',
+        name: 'ambiti',
+        builder: (context, state) => HomeScreen(
+              screenName: "Ambiti",
+              child: AmbitiScreen(),
+            ),
+        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(
+        path: '/app/campus',
+        name: 'campus',
+        builder: (context, state) => HomeScreen(
+              screenName: "Campus",
+              child: CampusScreen(),
+            ),
+        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(
+        path: '/app/database',
+        name: 'database',
+        builder: (context, state) => HomeScreen(
+              screenName: "Database",
+              child: DatabaseScreen(),
+            ),
+        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
     GoRoute(
         path: '/app/docenti_inesistenti',
         name: 'docenti_inesistenti',
         builder: (context, state) => HomeScreen(screenName: "Docenti inesistenti", child: DocentiInesistentiScreen()),
         redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(path: '/app/personale', name: 'personale', builder: (context, state) => HomeScreen(screenName: "Personale", child: PersonaleScreen()), redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(
+        path: '/app/personale',
+        name: 'personale',
+        builder: (context, state) => HomeScreen(
+              screenName: "Personale",
+              child: PersonaleScreen(),
+            ),
+        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
+    GoRoute(
+        path: '/app/strutture',
+        name: 'strutture',
+        builder: (context, state) => HomeScreen(
+              screenName: "Strutture",
+              child: StruttureScreen(),
+            ),
+        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
   ];
 
   static FutureOr<String?> _socialRedirect(BuildContext context, GoRouterState state) async {
@@ -102,9 +140,6 @@ class AppRouter {
       ...publicRoutes,
       ...superAdminRoutes,
 
-      // --- MODIFICA CHIAVE ---
-      // La rotta per l'importazione dei contatti è ora una rotta di primo livello.
-      // Non è più dentro la ShellRoute.
       GoRoute(
         path: '/app/import-contacts', // Il percorso ora corrisponde a quello del redirect
         name: AppRoute.importContacts.name,
@@ -114,7 +149,10 @@ class AppRouter {
           GoRoute(
             path: 'colleghi', // Il percorso completo sarà /app/import-contacts/colleghi
             name: AppRoute.colleghi.name,
-            builder: (context, state) => HomeScreen(screenName: "Colleghi", child: ColleghiScreen()),
+            builder: (context, state) {
+              uiController.setCurrentScreenName("Colleghi"); // Titolo predefinito per Colleghi, sarà aggiornato dalla schermata
+              return HomeScreen(screenName: "Colleghi", child: ColleghiScreen());
+            },
           ),
         ],
       ),
@@ -123,8 +161,10 @@ class AppRouter {
       ShellRoute(
         navigatorKey: _shellNavigatorKey,
         builder: (context, state, child) {
-          final screenName = state.topRoute?.name ?? 'Home';
-          return HomeScreen(screenName: screenName, child: child);
+          // Imposta il titolo predefinito per le schermate interne alla ShellRoute
+          final screenNameFromRoute = state.topRoute?.name ?? 'Home';
+          uiController.setCurrentScreenName(screenNameFromRoute.capitalizeFirst.toString()); // Utilizza capitalizeFirst per una buona formattazione
+          return HomeScreen(screenName: screenNameFromRoute.capitalizeFirst.toString(), child: child);
         },
         routes: [
           // Le rotte figlie della ShellRoute.
@@ -133,11 +173,6 @@ class AppRouter {
             path: '/app/home',
             name: 'home',
             builder: (context, state) => const Center(child: Text('Contenuto principale della Home')),
-          ),
-          GoRoute(
-            path: '/app/strutture',
-            name: 'strutture',
-            builder: (context, state) => HomeScreen(screenName: "Strutture", child: StruttureScreen()),
           ),
           GoRoute(
             path: '/app/chat',

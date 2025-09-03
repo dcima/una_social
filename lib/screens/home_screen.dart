@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/controllers/auth_controller.dart';
 import 'package:una_social/controllers/esterni_controller.dart';
 import 'package:una_social/controllers/personale_controller.dart';
+import 'package:una_social/controllers/ui_controller.dart';
 import 'package:una_social/helpers/auth_helper.dart';
 import 'package:una_social/helpers/avatar_helper.dart';
 import 'package:una_social/helpers/db_grid.dart';
@@ -31,8 +32,8 @@ class HomeScreen extends StatefulWidget {
 
   const HomeScreen({
     super.key,
-    required this.screenName,
     required this.child,
+    this.screenName = 'Home',
   });
 
   @override
@@ -239,6 +240,17 @@ class _HomeScreenState extends State<HomeScreen> {
     final isDesktop = screenWidth > 600;
     final currentDbGridControl = _getDbGridControl();
     final canShowDbGridControls = currentDbGridControl != null;
+    final UiController uiController = Get.find<UiController>(); // Ottieni il controller
+
+    // Puoi inizializzare il titolo del controller con il screenName passato,
+    // se non è già stato impostato da una schermata specifica.
+    // Oppure lasciare che siano le singole schermate a impostarlo.
+    // Per garantire che ci sia sempre un titolo sensato, lo imposto qui,
+    // ma le schermate figlie come ColleghiScreen lo sovrascriveranno.
+    if (uiController.currentScreenName.value == 'Caricamento...' || uiController.currentScreenName.value != widget.screenName) {
+      uiController.setCurrentScreenName(widget.screenName);
+    }
+
     DBGridConfig? currentGridConfig;
     if (widget.child is DBGridProvider) {
       currentGridConfig = (widget.child as DBGridProvider).dbGridConfig;

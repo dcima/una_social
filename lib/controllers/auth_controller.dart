@@ -1,9 +1,16 @@
 // lib/controllers/auth_controller.dart
-import 'dart:async';
+import 'dart:async'; // Import for Timer and StreamSubscription
 
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:una_social/helpers/logger_helper.dart'; // Import for ChangeNotifier if GoRouterRefreshStream is used with it
+import 'package:una_social/helpers/logger_helper.dart';
+import 'package:una_social/controllers/personale_controller.dart'; // Import PersonaleController
+import 'package:una_social/controllers/esterni_controller.dart'; // Import EsterniController
+import 'package:una_social/models/personale.dart'; // Import Personale model
+import 'package:una_social/models/esterni.dart'; // Import Esterni model
+
+// Define the UserType enum
+enum UserType { personale, esterno }
 
 class AuthController extends GetxController {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -20,6 +27,12 @@ class AuthController extends GetxController {
   final _isLoggedIn = false.obs;
   bool get isLoggedIn => _isLoggedIn.value;
 
+  // AGGIUNTO: Stato reattivo per il tipo di utente
+  final Rxn<UserType> _currentUserType = Rxn<UserType>();
+  UserType? get currentUserType => _currentUserType.value;
+  bool get isPersonale => _currentUserType.value == UserType.personale;
+  bool get isEsterno => _currentUserType.value == UserType.esterno;
+
   // AGGIUNTO: Metodo per impostare lo stato di login, chiamato da main.dart
   void setIsLoggedIn(bool value) {
     if (_isLoggedIn.value != value) {
@@ -32,12 +45,22 @@ class AuthController extends GetxController {
   RealtimeChannel? _onlineUsersChannel;
   final Set<String> _activeUserIds = {};
   Completer<void>? _permissionsCompleter;
+  Completer<void>? _userTypeCompleter; // New completer for user type determination
+
+  // GetX controllers for profiles
+  // Using `late final` and `Get.find()` in onInit ensures they are available
+  // after the GetX binding is set up. This assumes PersonaleController
+  // and EsterniController are registered with GetX (e.g., in main.dart or a binding).
+  late final PersonaleController _personaleController;
+  late final EsterniController _esterniController;
 
   @override
   void onInit() {
     super.onInit();
-    // The onAuthStateChange stream is the single source of truth.
-    // It fires initialSession automatically on startup, so no extra checks are needed.
+    // Initialize other controllers here, assuming they are registered
+    _personaleController = Get.find<PersonaleController>();
+    _esterniController = Get.find<EsterniController>();
+
     _supabase.auth.onAuthStateChange.listen((data) {
       logInfo('[AuthController] Auth Event: ${data.event}, Has Session: ${data.session != null}');
       _handleAuthStateChange(data);
@@ -57,26 +80,23 @@ class AuthController extends GetxController {
 
     // A session exists (user is signed in, session restored, or token refreshed)
     if (session != null) {
-      // Imposta lo stato di login a true se c'è una sessione valida
       setIsLoggedIn(true);
 
-      // We only need to react when the user state actually changes.
       if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession || event == AuthChangeEvent.tokenRefreshed) {
         lastUserEmail = _supabase.auth.currentUser?.email;
         logInfo('[AuthController] Session available. Loading permissions and subscribing to presence.');
         loadPermissions();
+        _determineAndSetUserType(); // Call new method to determine user type
         _subscribeToOnlineUsers();
       }
-      // No session exists (user signed out, or initial check found no session)
     } else {
       // session == null
-      // Imposta lo stato di login a false se non c'è una sessione
       setIsLoggedIn(false);
 
-      // We only need to react when the user state actually changes.
       if (event == AuthChangeEvent.signedOut || event == AuthChangeEvent.initialSession) {
         logInfo('[AuthController] No session. Clearing permissions and unsubscribing.');
         clearUserPermissions();
+        _clearUserType(); // Call new method to clear user type
         _unsubscribeFromOnlineUsers();
       }
     }
@@ -117,6 +137,7 @@ class AuthController extends GetxController {
       if (!(_permissionsCompleter?.isCompleted ?? true)) {
         _permissionsCompleter!.complete();
       }
+      _permissionsCompleter = null; // Reset after completion
     }
   }
 
@@ -128,8 +149,93 @@ class AuthController extends GetxController {
     if (!(_permissionsCompleter?.isCompleted ?? true)) {
       _permissionsCompleter?.completeError("Permissions cleared during load.");
     }
-    _permissionsCompleter = null;
+    _permissionsCompleter = null; // Reset
     logInfo('[AuthController] User permissions cleared.');
+  }
+
+  /// New method to determine and set the user type (personale/esterno).
+  Future<void> _determineAndSetUserType() async {
+    if (_userTypeCompleter != null && !_userTypeCompleter!.isCompleted) {
+      logInfo('[AuthController] User type determination already in progress, awaiting...');
+      return _userTypeCompleter?.future;
+    }
+    if (_supabase.auth.currentUser == null) {
+      logError('[AuthController] _determineAndSetUserType called with no user.');
+      _clearUserType();
+      return;
+    }
+
+    _userTypeCompleter = Completer<void>();
+    logInfo('[AuthController] Starting user type determination...');
+
+    StreamSubscription? personaleSub;
+    StreamSubscription? esternoSub;
+    Timer? timeoutTimer;
+
+    try {
+      // Function to check profiles and complete the completer
+      void checkProfiles() {
+        final Personale? personaleProfile = _personaleController.personale.value;
+        final Esterni? esternoProfile = _esterniController.esterni.value;
+
+        if (personaleProfile != null) {
+          _currentUserType.value = UserType.personale;
+          logInfo('[AuthController] User type determined as Personale.');
+          if (!(_userTypeCompleter?.isCompleted ?? true)) _userTypeCompleter!.complete();
+        } else if (esternoProfile != null) {
+          _currentUserType.value = UserType.esterno;
+          logInfo('[AuthController] User type determined as Esterno.');
+          if (!(_userTypeCompleter?.isCompleted ?? true)) _userTypeCompleter!.complete();
+        } else {
+          // If both are null, it might mean they are still loading or no profile exists.
+          // We don't complete here, we wait for a profile or timeout.
+          logInfo('[AuthController] Profiles still null, waiting for Personale/Esterni controllers to update...');
+        }
+      }
+
+      // Initial check in case profiles are already loaded
+      checkProfiles();
+
+      // If not completed, set up listeners
+      if (!(_userTypeCompleter?.isCompleted ?? true)) {
+        personaleSub = _personaleController.personale.listen((_) => checkProfiles());
+        esternoSub = _esterniController.esterni.listen((_) => checkProfiles());
+
+        // Set a timeout to prevent infinite waiting
+        timeoutTimer = Timer(const Duration(seconds: 5), () {
+          if (!(_userTypeCompleter?.isCompleted ?? true)) {
+            _currentUserType.value = null; // Could not determine in time
+            logWarning('[AuthController] User type determination timed out. No profile found within 5 seconds.');
+            _userTypeCompleter!.complete(); // Complete to unblock
+          }
+        });
+
+        await _userTypeCompleter!.future; // Wait for a profile or timeout
+      }
+    } catch (e) {
+      logError('[AuthController] Error determining user type: $e');
+      _currentUserType.value = null;
+    } finally {
+      // Clean up subscriptions and timer regardless of success or failure
+      personaleSub?.cancel();
+      esternoSub?.cancel();
+      timeoutTimer?.cancel();
+
+      if (!(_userTypeCompleter?.isCompleted ?? true)) {
+        _userTypeCompleter!.complete(); // Ensure it's always completed
+      }
+      _userTypeCompleter = null; // Reset after completion
+    }
+  }
+
+  /// Clears the user type, usually called on logout.
+  void _clearUserType() {
+    _currentUserType.value = null;
+    if (!(_userTypeCompleter?.isCompleted ?? true)) {
+      _userTypeCompleter?.completeError("User type cleared during determination.");
+    }
+    _userTypeCompleter = null; // Reset
+    logInfo('[AuthController] User type cleared.');
   }
 
   /// Internal function to call the RPC for Super Admin status.
@@ -238,17 +344,10 @@ class AuthController extends GetxController {
     if (_onlineUsersChannel == null) return;
     logInfo("PRESENCE: Reconciling user state...");
 
-    // 1. Chiama la tua funzione helper corretta.
     final List<SinglePresenceState> presenceStateList = _onlineUsersChannel!.presenceState();
 
-    // 2. Estrai gli ID. La logica ora è più semplice.
-    final Set<String> remoteUserIds = presenceStateList
-        .expand((state) => state.presences) // Appiattisce le liste di Presence
-        .map((p) => p.payload['user_id'] as String?) // Estrae gli ID
-        .whereType<String>() // Filtra i null e tipizza a String
-        .toSet(); // Crea il Set
+    final Set<String> remoteUserIds = presenceStateList.expand((state) => state.presences).map((p) => p.payload['user_id'] as String?).whereType<String>().toSet();
 
-    // 3. Il resto della logica rimane invariato
     if (!_areSetsEqual(_activeUserIds, remoteUserIds)) {
       logInfo("PRESENCE: Discrepancy detected. Syncing state. Local: $_activeUserIds, Remote: $remoteUserIds");
       _activeUserIds

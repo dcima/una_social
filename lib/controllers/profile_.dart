@@ -6,7 +6,7 @@ class ProfileService extends ChangeNotifier {
 
   ProfileService(this._supabase);
 
-  bool _hasCheckedRelationships = false;
+  bool hasCheckedRelationships = false;
   bool _hasAcceptedRelationships = false;
 
   // Getter pubblico per la UI e il router
@@ -25,14 +25,14 @@ class ProfileService extends ChangeNotifier {
       // In caso di errore, assumiamo che non ci siano contatti per sicurezza.
       _hasAcceptedRelationships = false;
     } finally {
-      _hasCheckedRelationships = true;
+      hasCheckedRelationships = true;
       // Notifica i listener (come il router) che lo stato è cambiato.
       notifyListeners();
     }
   }
 
   void reset() {
-    _hasCheckedRelationships = false;
+    hasCheckedRelationships = false;
     _hasAcceptedRelationships = false;
   }
 }

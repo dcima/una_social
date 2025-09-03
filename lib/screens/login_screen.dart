@@ -41,6 +41,9 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     _authStateSubscription = supabase.auth.onAuthStateChange.listen((data) {});
 
+    _emailController.text = 'diego.cimarosa@unibo.it';
+    _passwordController.text = 'Kuripel\$89';
+
     _emailController.addListener(_validateEmailForRegistration);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _emailFocusNode.requestFocus();

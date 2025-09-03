@@ -48,6 +48,12 @@ Future<void> main() async {
       );
       logInfo("Client Supabase inizializzato.");
 
+      // MODIFICA QUI: Inizializza PersonaleController ed EsterniController PRIMA di AuthController
+      // in modo che AuthController possa trovarli nel suo onInit.
+      Get.put(PersonaleController(), permanent: true);
+      Get.put(EsterniController(), permanent: true);
+      logInfo("PersonaleController ed EsterniController inizializzati.");
+
       // Inizializza AuthController molto presto. Questo controller dovrebbe gestire lo stato di autenticazione.
       final AuthController authController = Get.put(AuthController(), permanent: true);
       logInfo("AuthController inizializzato.");
@@ -88,9 +94,8 @@ Future<void> main() async {
       }
 
       // Ora che lo stato iniziale di autenticazione è stato gestito,
-      // inizializziamo gli altri controller.
-      Get.put(PersonaleController(), permanent: true);
-      Get.put(EsterniController(), permanent: true);
+      // inizializziamo gli altri controller che dipendono da una sessione valida o da AuthController.
+      // ProfileController può essere inizializzato qui o anche prima, a seconda delle sue dipendenze.
       Get.put(ProfileController(), permanent: true);
       logInfo("[Main] Tutti i controller sono stati inizializzati.");
 
