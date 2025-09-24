@@ -95,7 +95,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     }
 
     String? strutturaNome; // Variabile per contenere il nome della struttura
-
+    String screenName;
     try {
       // NUOVO: Recupera il nome della struttura dalla tabella public.strutture
       final structureResult = await Supabase.instance.client.from('strutture').select('nome').eq('ente', personale!.ente).eq('id', personale.struttura).single();
@@ -112,11 +112,13 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
           isLoading = false;
         });
         // Aggiorna il titolo con il nome della struttura recuperato
-        if (strutturaNome != null && strutturaNome.isNotEmpty) {
-          uiController.setCurrentScreenName('Colleghi: $strutturaNome');
+        if (strutturaNome != null) {
+          screenName = 'Colleghi: $strutturaNome';
         } else {
-          uiController.setCurrentScreenName('Colleghi: Struttura Sconosciuta');
+          screenName = 'Colleghi: Struttura Sconosciuta';
         }
+        appLogger.info('Screenname: $screenName');
+        uiController.setCurrentScreenName(screenName);
       }
     } catch (e) {
       appLogger.error('Errore nel recupero del nome della struttura: $e');

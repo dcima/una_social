@@ -1,0 +1,10 @@
+BEGIN
+  -- Inserisce una nuova riga in chat.users usando l'ID e l'email del nuovo utente da auth.users
+  INSERT INTO chat.users (id, display_name, phone)
+  VALUES (new.id, new.raw_user_meta_data->>'full_name', new.phone);
+  
+  -- Se l'utente si è registrato con un'email presente in public.personale,
+  -- potremmo voler collegare i dati. Per ora, ci concentriamo sulla creazione base.
+
+  RETURN new;
+END;

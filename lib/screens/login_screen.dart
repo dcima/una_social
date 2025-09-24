@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:una_social/helpers/auth_helper.dart';
+import 'package:una_social/helpers/logger_helper.dart';
 import 'package:una_social/helpers/snackbar_helper.dart';
 
 final supabase = Supabase.instance.client;
@@ -107,21 +108,52 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // **MODIFICATO:** La registrazione non apre più un dialogo
   Future<void> _handleRegistration() async {
+    appLogger.info('*** INIZIO _handleRegistration ***');
+
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
 
+    final email = _emailController.text.trim();
+    if (!_isEmailValidForRegistration) {
+      SnackbarHelper.showErrorSnackbar(context, 'Inserisci un\'email valida per la registrazione.');
+      return;
+    }
+
     setState(() => _isLoading = true);
 
-    // Genera una password temporanea sicura
-    final tempPassword = _generateSecureRandomPassword();
-
     try {
+      String? foundInTable;
+
+      final List<Map<String, dynamic>> personaleData = await supabase.from('personale').select('email_principale').eq('email_principale', email);
+      appLogger.info("personaleData: $personaleData.toString()");
+
+      if (personaleData.isNotEmpty) {
+        foundInTable = 'Tabella Personale';
+      }
+
+      // 1.1.2. effettua una ricerca sulla tabella esterni per email_principale
+      if (foundInTable == null) {
+        final List<Map<String, dynamic>> esterniData = await supabase.from('esterni').select('email_principale').eq('email_principale', email);
+        appLogger.info("esterniData: $esterniData.toString()");
+        if (esterniData.isNotEmpty) {
+          foundInTable = 'Tabella Esterni';
+        }
+      }
+
+      // 2. segnala con SnackBar(...) "Email già presente in $trovato_in"
+      if (mounted && foundInTable != null) {
+        SnackbarHelper.showErrorSnackbar(context, 'Email già presente in $foundInTable.');
+        return;
+      }
+
+      // 3. prosegui con _handleRegistration() (existing logic)
+      final tempPassword = _generateSecureRandomPassword();
+
       final response = await supabase.functions.invoke(
         'register-user',
         method: HttpMethod.post,
-        body: {'email': _emailController.text.trim(), 'password': tempPassword},
+        body: {'email': email, 'password': tempPassword},
       );
 
       if (!mounted) return;
@@ -138,11 +170,11 @@ class _LoginScreenState extends State<LoginScreen> {
     } on FunctionException catch (e) {
       if (!mounted) return;
       final details = e.details is Map ? (e.details as Map)['error'] ?? e.details : e.details;
-      Logger('LoginScreen').severe('FunctionException in _registerUser: $details');
+      Logger('LoginScreen').severe('FunctionException in _handleRegistration: $details');
       SnackbarHelper.showErrorSnackbar(context, 'Errore di comunicazione: $details');
     } catch (e) {
       if (!mounted) return;
-      Logger('LoginScreen').severe('Errore inatteso in _registerUser: $e');
+      Logger('LoginScreen').severe('Errore inatteso in _handleRegistration: $e');
       SnackbarHelper.showErrorSnackbar(context, 'Si è verificato un errore inatteso.');
     } finally {
       if (mounted) setState(() => _isLoading = false);

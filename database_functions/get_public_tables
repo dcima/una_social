@@ -1,0 +1,10 @@
+
+  select
+    t.table_name::text
+  from
+    information_schema.tables as t
+  where
+    t.table_schema = 'public' -- Filtra solo per lo schema 'public'
+    and t.table_type = 'BASE TABLE' -- Esclude viste (VIEW), tabelle esterne, ecc.
+  order by
+    t.table_name; -- Ordina alfabeticamente per un output consistente

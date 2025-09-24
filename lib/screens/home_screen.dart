@@ -240,121 +240,113 @@ class _HomeScreenState extends State<HomeScreen> {
     final isDesktop = screenWidth > 600;
     final currentDbGridControl = _getDbGridControl();
     final canShowDbGridControls = currentDbGridControl != null;
-    final UiController uiController = Get.find<UiController>(); // Ottieni il controller
+    final UiController uiController = Get.find<UiController>();
 
-    // Puoi inizializzare il titolo del controller con il screenName passato,
-    // se non è già stato impostato da una schermata specifica.
-    // Oppure lasciare che siano le singole schermate a impostarlo.
-    // Per garantire che ci sia sempre un titolo sensato, lo imposto qui,
-    // ma le schermate figlie come ColleghiScreen lo sovrascriveranno.
-    if (uiController.currentScreenName.value == 'Caricamento...' || uiController.currentScreenName.value != widget.screenName) {
-      uiController.setCurrentScreenName(widget.screenName);
-    }
-
-    DBGridConfig? currentGridConfig;
-    if (widget.child is DBGridProvider) {
-      currentGridConfig = (widget.child as DBGridProvider).dbGridConfig;
-    }
+    // Make only the title reactive, not the entire Scaffold body.
+    final String currentScreenTitle = uiController.currentScreenName.value;
+    final currentGridConfig = (widget.child is DBGridProvider) ? (widget.child as DBGridProvider).dbGridConfig : null;
     final canToggleView = canShowDbGridControls && (currentGridConfig?.uiModes.length ?? 0) > 1;
 
     return Scaffold(
       drawer: _buildDrawer(context, isDesktop ? 250.0 : screenWidth * 0.8, 80.0, 40.0 * 0.8),
-      body: Column(
-        children: [
-          Material(
-            elevation: 1.0,
-            child: SizedBox(
-              height: kToolbarHeight,
-              child: Row(
-                children: [
-                  Builder(builder: (innerContext) => IconButton(tooltip: "Apri menù", icon: const Icon(Icons.menu), onPressed: () => Scaffold.of(innerContext).openDrawer())),
-                  const SizedBox(width: 8),
-                  const FlutterLogo(size: 24),
-                  const SizedBox(width: 8),
-                  const Text('Una Social', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(widget.screenName, style: const TextStyle(fontSize: 20, color: Colors.red, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                  if (canShowDbGridControls) ...[
-                    IconButton(tooltip: "Ricarica Dati", icon: const Icon(Icons.refresh), onPressed: currentDbGridControl.refreshData),
-                    if (canToggleView) IconButton(tooltip: "Cambia vista", icon: const Icon(Icons.view_quilt_outlined), onPressed: _handleToggleView),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Material(
+              elevation: 1.0,
+              child: SizedBox(
+                height: kToolbarHeight,
+                child: Row(
+                  children: [
+                    Builder(builder: (innerContext) => IconButton(tooltip: "Apri menù", icon: const Icon(Icons.menu), onPressed: () => Scaffold.of(innerContext).openDrawer())),
+                    const SizedBox(width: 8),
+                    const FlutterLogo(size: 24),
+                    const SizedBox(width: 8),
+                    const Text('Una Social', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 12),
+                    // Display the current screen name, which is now reactive via Obx below.
+                    Expanded(child: Text(currentScreenTitle, style: const TextStyle(fontSize: 20, color: Colors.red, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                    if (canShowDbGridControls) ...[
+                      IconButton(tooltip: "Ricarica Dati", icon: const Icon(Icons.refresh), onPressed: currentDbGridControl.refreshData),
+                      if (canToggleView) IconButton(tooltip: "Cambia vista", icon: const Icon(Icons.view_quilt_outlined), onPressed: _handleToggleView),
+                    ],
+                    const SizedBox(width: 10),
+                    Obx(() {
+                      // Keep Obx for parts that depend on observables
+                      final authUser = Supabase.instance.client.auth.currentUser;
+                      if (authUser == null) return Padding(padding: const EdgeInsets.all(8.0), child: _buildAvatar(null));
+
+                      final Personale? personale = ctrlPersonale.personale.value;
+                      final Esterni? esterno = ctrlEsterni.esterni.value;
+                      final IUserProfile? activeProfile = personale ?? esterno;
+                      final bool isLoading = ctrlPersonale.isLoading.value || ctrlEsterni.isLoading.value;
+
+                      final bool isExternalUser = personale == null;
+                      final bool profileIsMissing = esterno == null;
+                      if (!_profileCheckCompleted && isExternalUser && !isLoading && profileIsMissing) {
+                        _profileCheckCompleted = true;
+                        _promptToCompleteProfile(authUser);
+                      }
+
+                      if (activeProfile == null && isLoading) {
+                        return const Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
+                      }
+
+                      return FutureBuilder<String?>(
+                        key: ValueKey('avatar_${activeProfile?.photoUrl}_${authUser.id}'),
+                        future: AvatarHelper.getDisplayAvatarUrl(
+                          user: activeProfile,
+                          authUser: authUser,
+                        ),
+                        builder: (context, snapshot) {
+                          Widget avatarContent;
+
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            avatarContent = const CircleAvatar(radius: 18, child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
+                          } else {
+                            avatarContent = _buildAvatar(snapshot.data);
+                          }
+
+                          return PopupMenuButton<ProfileAction>(
+                            tooltip: "Opzioni Profilo",
+                            itemBuilder: (popupContext) => [
+                              const PopupMenuItem(value: ProfileAction.edit, child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Modifica profilo'), dense: true)),
+                              const PopupMenuDivider(),
+                              const PopupMenuItem(value: ProfileAction.version, child: ListTile(leading: Icon(Icons.info_outline), title: Text('Versione'), dense: true)),
+                              const PopupMenuItem(value: ProfileAction.logout, child: ListTile(leading: Icon(Icons.exit_to_app, color: Colors.redAccent), title: Text('Esci', style: TextStyle(color: Colors.redAccent)), dense: true)),
+                            ],
+                            onSelected: (action) {
+                              switch (action) {
+                                case ProfileAction.edit:
+                                  final profileToEdit = activeProfile ?? Esterni(id: '', authUuid: authUser.id, emailPrincipale: authUser.email);
+                                  _showProfileDialog(profileToEdit);
+                                  break;
+                                case ProfileAction.logout:
+                                  AuthHelper.setLogoutReason(LogoutReason.userInitiated);
+                                  Supabase.instance.client.auth.signOut();
+                                  break;
+                                case ProfileAction.version:
+                                  _showVersionDialog();
+                                  break;
+                              }
+                            },
+                            offset: const Offset(0, kToolbarHeight * 0.8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: avatarContent),
+                          );
+                        },
+                      );
+                    }),
+                    const SizedBox(width: 10),
                   ],
-                  const SizedBox(width: 10),
-                  Obx(() {
-                    final authUser = Supabase.instance.client.auth.currentUser;
-                    if (authUser == null) return Padding(padding: const EdgeInsets.all(8.0), child: _buildAvatar(null));
-
-                    final Personale? personale = ctrlPersonale.personale.value;
-                    final Esterni? esterno = ctrlEsterni.esterni.value;
-                    final IUserProfile? activeProfile = personale ?? esterno;
-                    final bool isLoading = ctrlPersonale.isLoading.value || ctrlEsterni.isLoading.value;
-
-                    final bool isExternalUser = personale == null;
-                    final bool profileIsMissing = esterno == null;
-                    if (!_profileCheckCompleted && isExternalUser && !isLoading && profileIsMissing) {
-                      _profileCheckCompleted = true;
-                      _promptToCompleteProfile(authUser);
-                    }
-
-                    if (activeProfile == null && isLoading) {
-                      return const Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
-                    }
-
-                    // Re-introduce FutureBuilder since getDisplayAvatarUrl is now async
-                    return FutureBuilder<String?>(
-                      // Use a unique key to force the future to re-run when the profile changes
-                      key: ValueKey('avatar_${activeProfile?.photoUrl}_${authUser.id}'),
-                      future: AvatarHelper.getDisplayAvatarUrl(
-                        user: activeProfile,
-                        authUser: authUser,
-                      ),
-                      builder: (context, snapshot) {
-                        Widget avatarContent;
-
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          // Show a loader while waiting for the signed URL
-                          avatarContent = const CircleAvatar(radius: 18, child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
-                        } else {
-                          // Build the avatar with the result (which could be null)
-                          avatarContent = _buildAvatar(snapshot.data);
-                        }
-
-                        return PopupMenuButton<ProfileAction>(
-                          tooltip: "Opzioni Profilo",
-                          itemBuilder: (popupContext) => [
-                            const PopupMenuItem(value: ProfileAction.edit, child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Modifica profilo'), dense: true)),
-                            const PopupMenuDivider(),
-                            const PopupMenuItem(value: ProfileAction.version, child: ListTile(leading: Icon(Icons.info_outline), title: Text('Versione'), dense: true)),
-                            const PopupMenuItem(value: ProfileAction.logout, child: ListTile(leading: Icon(Icons.exit_to_app, color: Colors.redAccent), title: Text('Esci', style: TextStyle(color: Colors.redAccent)), dense: true)),
-                          ],
-                          onSelected: (action) {
-                            switch (action) {
-                              case ProfileAction.edit:
-                                final profileToEdit = activeProfile ?? Esterni(id: '', authUuid: authUser.id, emailPrincipale: authUser.email);
-                                _showProfileDialog(profileToEdit);
-                                break;
-                              case ProfileAction.logout:
-                                AuthHelper.setLogoutReason(LogoutReason.userInitiated);
-                                Supabase.instance.client.auth.signOut();
-                                break;
-                              case ProfileAction.version:
-                                _showVersionDialog();
-                                break;
-                            }
-                          },
-                          offset: const Offset(0, kToolbarHeight * 0.8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: avatarContent),
-                        );
-                      },
-                    );
-                  }),
-                  const SizedBox(width: 10),
-                ],
+                ),
               ),
             ),
-          ),
-          Expanded(child: widget.child),
-        ],
+            // The child widget (e.g., ColleghiScreen) should not cause re-entrancy.
+            // If it does, further investigation into ColleghiScreen's build method is needed.
+            Expanded(child: widget.child),
+          ],
+        ),
       ),
     );
   }

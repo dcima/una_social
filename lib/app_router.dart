@@ -40,12 +40,24 @@ class GoRouterRefreshStream extends ChangeNotifier {
 
   GoRouterRefreshStream(Stream<AuthState> stream) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_isDisposed) notifyListeners();
+      if (!_isDisposed) _safeNotifyListeners(); // Usa la funzione con ritardo
     });
     _subscription = stream.asBroadcastStream().listen((AuthState data) {
-      if (!_isDisposed) notifyListeners();
+      if (!_isDisposed) _safeNotifyListeners(); // Usa la funzione con ritardo
     }, onError: (error) {
-      if (!_isDisposed) notifyListeners();
+      if (!_isDisposed) _safeNotifyListeners(); // Usa la funzione con ritardo
+    });
+  }
+
+  // Nuova funzione per ritardare la notifica ai listener del router
+  void _safeNotifyListeners() {
+    // Ritarda leggermente la notifica per permettere alle operazioni UI in corso
+    // (come la chiusura di un popup) di completarsi prima che il router
+    // inizi una nuova navigazione.
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (!_isDisposed) {
+        notifyListeners();
+      }
     });
   }
 

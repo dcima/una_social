@@ -31,40 +31,48 @@ serve(async (req) => {
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
 
-    // Usa il metodo standard `signUp`.
-    // Questo creerà l'utente ma NON lo confermerà, inviando l'email di conferma
-    // che verrà gestita dal tuo hook "custom-email-sender".
     const { data, error } = await supabaseAdmin.auth.signUp({
       email: email,
       password: password,
     })
 
     if (error) {
-      console.error('Errore da Supabase durante la registrazione:', error.message);
-      
-      if (error.message.includes('User already registered')) {
-        return new Response(JSON.stringify({ error: 'Un utente con questa email è già registrato.' }), {
+      // Logga l'intero oggetto errore per maggiori dettagli sul server
+      console.error('Errore dettagliato da Supabase durante la registrazione:', JSON.stringify(error, null, 2));
+
+      // Gestione specifica per "User already registered"
+      if (error.message.includes('User already registered') || error.message.includes('A user with this email address already exists')) {
+        return new Response(JSON.stringify({ error: 'Un utente con questa email è già registrato nel sistema di autenticazione.' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 409, // Conflict
         })
       }
-      
-      return new Response(JSON.stringify({ error: error.message }), {
+
+      // Gestione specifica per errori di politica della password
+      if (error.message.includes('Password should be at least')) {
+        return new Response(JSON.stringify({ error: 'La password non rispetta i requisiti di sicurezza. Deve essere di almeno 6 caratteri.' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400, // Bad Request
+        })
+      }
+
+      // Per altri errori di AuthApiError, restituisci il messaggio di errore specifico al client
+      return new Response(JSON.stringify({ error: error.message || 'Errore generico durante la registrazione dell\'utente.' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: error.status || 400,
+        status: error.status || 500, // Usa lo status dell'errore se disponibile, altrimenti 500
       })
     }
 
-    return new Response(JSON.stringify({ 
+    return new Response(JSON.stringify({
       message: 'Registrazione avviata. Controlla la tua email per il link di conferma.',
-      user: data.user 
+      user: data.user
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
 
   } catch (e) {
-    console.error('Errore generico nella funzione:', e.message);
+    console.error('Errore generico nella funzione:', e instanceof Error ? e.message : e); // Logga il messaggio se è un Error
     return new Response(JSON.stringify({ error: 'Errore interno del server' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,

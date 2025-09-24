@@ -1,0 +1,63 @@
+
+DECLARE
+    filtered_data jsonb;
+    total_count integer;
+    query_data_str text;
+    query_count_str text;
+    order_clause text;
+    where_clause text;
+BEGIN
+    -- Costruisci la clausola WHERE utilizzando %L per quotare i valori letterali.
+    -- Questo fa sì che i valori di p_ente e p_struttura_id siano inseriti nella stringa SQL
+    -- come costanti, non come nomi di colonne.
+    where_clause := format('WHERE c.ente = %L AND c.struttura = %L', p_ente, p_struttura_id);
+
+    -- Aggiungi clausola di filtro se p_filter_column e p_filter_value sono forniti
+    IF p_filter_column IS NOT NULL AND p_filter_value IS NOT NULL AND p_filter_value <> '' THEN
+        -- %I per quotare l'identificatore (nome della colonna), %L per quotare il valore letterale
+        where_clause := where_clause || format(' AND c.%I ILIKE %L', p_filter_column, '%' || p_filter_value || '%');
+    END IF;
+
+    -- Determina la clausola ORDER BY
+    -- quote_ident() è equivalente a %I per quotare nomi di colonne/identificatori
+    order_clause := 'ORDER BY ' || quote_ident(p_order_by);
+    IF p_order_direction = 'desc' THEN
+        order_clause := order_clause || ' DESC';
+    ELSE
+        order_clause := order_clause || ' ASC';
+    END IF;
+
+    -- Costruisci la query per il conteggio totale dei record (prima della paginazione)
+    query_count_str := format('SELECT COUNT(*) FROM public.colleghi c %s', where_clause);
+
+    -- Esegui la query di conteggio. Non è necessario il parametro USING,
+    -- perché tutti i valori sono già stati quotati e inclusi nella stringa query_count_str.
+    EXECUTE query_count_str INTO total_count;
+
+    -- Costruisci la query per i dati paginati e ordinati
+    query_data_str := format('
+        SELECT jsonb_agg(row_to_json(c_sub))
+        FROM (
+            SELECT
+                c.ente,
+                c.struttura,
+                c.cognome,
+                c.nome,
+                c.email_principale,
+                c.photo_url
+            FROM
+                public.colleghi c
+            %s
+            %s
+            LIMIT %L OFFSET %L
+        ) c_sub', where_clause, order_clause, p_limit, p_offset);
+
+    -- Esegui la query dei dati. Anche qui, non è necessario il parametro USING.
+    EXECUTE query_data_str INTO filtered_data;
+
+    -- Restituisci un oggetto JSONB con i dati e il conteggio totale
+    RETURN jsonb_build_object(
+        'data', COALESCE(filtered_data, '[]'::jsonb),
+        'count', total_count
+    );
+END;
