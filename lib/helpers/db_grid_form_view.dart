@@ -1,7 +1,7 @@
 // lib/helpers/db_grid_form_view.dart
 import 'package:flutter/material.dart';
-import 'package:una_social/helpers/db_grid.dart';
-import 'package:una_social/helpers/logger_helper.dart'; // For DBGridControl and UIMode
+import 'package:una_social/helpers/db_grid.dart'; // IMPORTANT: This is the SOLE source for DBGridControl and UIMode
+//import 'package:una_social/helpers/logger_helper.dart'; // Only for logger, not for types like DBGridControl
 
 class DBGridFormView extends StatelessWidget {
   final Map<String, dynamic> formData;
@@ -19,6 +19,10 @@ class DBGridFormView extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final colorScheme = Theme.of(context).colorScheme;
+
+    // Get current record index and total records from dbGridControl
+    final int currentRecordNumber = dbGridControl.currentFormRecordIndex + 1; // 1-based index
+    final int totalRecordsInForm = dbGridControl.totalFormRecords;
 
     // Sort keys to ensure a consistent order, PKs first if possible
     List<String> sortedKeys = formData.keys.toList();
@@ -73,14 +77,12 @@ class DBGridFormView extends StatelessWidget {
                               fontWeight: isPrimaryKey ? FontWeight.bold : FontWeight.normal,
                             ),
                             filled: isPrimaryKey,
-                            // Updated: withAlpha instead of withOpacity
                             fillColor: isPrimaryKey ? Colors.yellow.withAlpha((0.2 * 255).round()) : null,
                             border: const OutlineInputBorder(),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
                           ),
                           style: TextStyle(
                             color: isPrimaryKey ? Colors.red : colorScheme.onSurface,
-                            // Updated: withAlpha instead of withOpacity
                             backgroundColor: isPrimaryKey ? Colors.yellow.withAlpha((0.1 * 255).round()) : Colors.transparent,
                           ),
                         ),
@@ -100,17 +102,12 @@ class DBGridFormView extends StatelessWidget {
                       tooltip: "Record Precedente",
                       onPressed: dbGridControl.canGoToPreviousRecordInForm() ? () => dbGridControl.goToPreviousRecordInForm() : null, // Disable if cannot go back
                     ),
-                    Text("Record X di Y"), // Placeholder for current record number
+                    Text("Record $currentRecordNumber di $totalRecordsInForm", style: textTheme.bodyMedium), // Updated text
                     IconButton(
-                        icon: const Icon(Icons.arrow_forward_ios),
-                        tooltip: "Record Successivo",
-                        onPressed: () {
-                          bool yesWeCan = dbGridControl.canGoToNextRecordInForm();
-                          logInfo("Record Successivo: $yesWeCan");
-                          if (yesWeCan) {
-                            dbGridControl.goToNextRecordInForm();
-                          }
-                        }),
+                      icon: const Icon(Icons.arrow_forward_ios),
+                      tooltip: "Record Successivo",
+                      onPressed: dbGridControl.canGoToNextRecordInForm() ? () => dbGridControl.goToNextRecordInForm() : null, // Disable if cannot go forward
+                    ),
                   ],
                 ),
                 const SizedBox(height: 20.0),

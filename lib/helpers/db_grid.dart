@@ -1,14 +1,15 @@
 // lib/helpers/db_grid.dart
 // ignore_for_file: prefer_final_fields, prefer_const_constructors_in_immutables, library_private_types_in_public_api, depend_on_referenced_packages, avoid_print
 
+import 'dart:async';
+import 'dart:convert';
+import 'package:collection/collection.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
+import 'package:una_social/helpers/db_grid_form_view.dart'; // Make sure this path is correct
 import 'package:una_social/helpers/logger_helper.dart';
-import 'package:una_social/helpers/db_grid_form_view.dart';
-import 'package:collection/collection.dart';
-import 'dart:convert';
-import 'dart:async';
 import 'package:universal_html/html.dart' as html; // Import per parsing HTML
 
 // --------------- ENUMS E CLASSI DI CONFIGURAZIONE ---------------
@@ -39,6 +40,7 @@ class DBGridConfig {
   final String? formHookName;
   final String? mapHookName;
   final String? rpcFunctionName;
+  final Function(int totalRecords)? onTotalRecordsChanged; // Callback for total records
 
   DBGridConfig({
     required this.dataSourceTable,
@@ -57,6 +59,7 @@ class DBGridConfig {
     this.selectable = false,
     this.showHeader = true,
     this.uiModes = const [UIMode.grid],
+    this.onTotalRecordsChanged,
   }) : assert(pageLength > 0, 'pageLength must be greater than 0');
 }
 
@@ -78,6 +81,10 @@ abstract class DBGridControl {
   void goToNextRecordInForm();
   Map<String, dynamic>? getCurrentRecordForForm();
   List<String> getPrimaryKeyColumns();
+
+  // NEW: Expose current record index and total records for form view
+  int get currentFormRecordIndex;
+  int get totalFormRecords;
 }
 
 // --------------- WIDGET BASE ASTRATTO ---------------
@@ -101,7 +108,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   bool _isLoading = true;
   String _errorMessage = '';
 
-  int _currentPage = 0;
+  int _currentPage = 0; // Managed internally, ColleghiScreen's _currentPage is for RPC offset
   int _totalRecords = 0;
 
   DataGridController _dataGridController = DataGridController();
@@ -149,6 +156,28 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     );
 
     _fetchData(isRefresh: true); // Initial data fetch
+  }
+
+  @override
+  void didUpdateWidget(covariant DBGridWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    final bool rpcFunctionParamsChanged = !DeepCollectionEquality().equals(
+      widget.config.rpcFunctionParams,
+      oldWidget.config.rpcFunctionParams,
+    );
+    final bool rpcFunctionNameChanged = widget.config.rpcFunctionName != oldWidget.config.rpcFunctionName;
+    // Puoi aggiungere altre comparazioni profonde se altri campi della config dovessero scatenare un refetch
+    // Ad esempio, per le colonne, anche se la key del widget dovrebbe già gestirlo per i cambiamenti strutturali
+    // final bool columnsDefinitionChanged = !DeepCollectionEquality().equals(
+    //   widget.config.columns.map((c) => c.columnName).toList(),
+    //   oldWidget.config.columns.map((c) => c.columnName).toList(),
+    // );
+
+    if (rpcFunctionParamsChanged || rpcFunctionNameChanged /* || columnsDefinitionChanged */) {
+      appLogger.info("DBGridWidget: rpcFunctionParams or rpcFunctionName changed. Refetching data.");
+      _fetchData(isRefresh: true);
+    }
   }
 
   @override
@@ -220,15 +249,16 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     if (!mounted) return;
 
     if (isRefresh) {
-      _currentPage = 0;
+      _currentPage = 0; // Reset internal page counter for full refresh
       _data.clear();
       _dataSource.clearSelections();
       _currentFormRecordIndex = -1;
     } else {
-      _currentPage++;
+      _currentPage++; // Increment internal page counter for load more
     }
 
-    if (_data.isNotEmpty && _data.length >= _totalRecords && !isRefresh) {
+    // Skip fetching if all records are already loaded (only for client-side pagination)
+    if (_data.isNotEmpty && _data.length >= _totalRecords && !isRefresh && _totalRecords > 0) {
       appLogger.info("All records already loaded. Not fetching more.");
       setState(() => _isLoading = false);
       return;
@@ -240,32 +270,39 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     });
 
     try {
-      final int limit = widget.config.pageLength;
-      final int offset = _currentPage * limit;
+      // Use p_limit and p_offset directly from widget.config.rpcFunctionParams
+      // as ColleghiScreen is now managing the currentPage for RPC calls.
+      final int limit = widget.config.rpcFunctionParams?['p_limit'] as int? ?? widget.config.pageLength;
+      final int offset = widget.config.rpcFunctionParams?['p_offset'] as int? ?? (_currentPage * limit); // Fallback to internal if not provided by RPC params
 
       dynamic rpcResult;
 
       if (widget.config.rpcFunctionName != null) {
         final Map<String, dynamic> rpcParams = Map.from(widget.config.rpcFunctionParams ?? {});
-        rpcParams['p_limit'] = limit;
-        rpcParams['p_offset'] = offset;
 
+        // If p_limit and p_offset are *not* already in rpcFunctionParams, add them based on internal state
+        // However, ColleghiScreen *is* passing them now, so this might be redundant, but safe.
+        rpcParams.putIfAbsent('p_limit', () => limit);
+        rpcParams.putIfAbsent('p_offset', () => offset);
+
+        // Ensure sorting parameters are present
         final sortedColumn = _sortedColumnsState.entries.firstOrNull;
         if (sortedColumn != null) {
           rpcParams['p_order_by'] = sortedColumn.key;
           rpcParams['p_order_direction'] = sortedColumn.value == DataGridSortDirection.ascending ? 'asc' : 'desc';
         } else {
-          rpcParams['p_order_by'] = widget.config.initialSortBy.isNotEmpty ? widget.config.initialSortBy.first.column : 'cognome';
-          rpcParams['p_order_direction'] = widget.config.initialSortBy.isNotEmpty && widget.config.initialSortBy.first.direction == SortDirection.desc ? 'desc' : 'asc';
+          rpcParams.putIfAbsent('p_order_by', () => widget.config.initialSortBy.isNotEmpty ? widget.config.initialSortBy.first.column : 'cognome');
+          rpcParams.putIfAbsent('p_order_direction', () => widget.config.initialSortBy.isNotEmpty && widget.config.initialSortBy.first.direction == SortDirection.desc ? 'desc' : 'asc');
         }
 
+        // Ensure filter parameters are present
         final activeFilter = _filterValues.entries.firstWhereOrNull((e) => e.value.isNotEmpty);
         if (activeFilter != null) {
           rpcParams['p_filter_column'] = activeFilter.key;
           rpcParams['p_filter_value'] = activeFilter.value;
         } else {
-          rpcParams['p_filter_column'] = null;
-          rpcParams['p_filter_value'] = null;
+          rpcParams.putIfAbsent('p_filter_column', () => null);
+          rpcParams.putIfAbsent('p_filter_value', () => null);
         }
 
         appLogger.info('RPC final params: $rpcParams');
@@ -280,7 +317,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           _totalRecords = (rpcResult['count'] as num?)?.toInt() ?? 0;
         } else if (rpcResult is List) {
           _data.addAll(List<Map<String, dynamic>>.from(rpcResult));
-          _totalRecords = _data.length;
+          _totalRecords = _data.length; // Assuming all data returned if not JSONB format
           appLogger.warning('RPC did not return expected JSONB with data and count. Assuming all data returned.');
         } else if (rpcResult != null) {
           _data.add(Map<String, dynamic>.from(rpcResult));
@@ -289,11 +326,15 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           _totalRecords = _data.length;
         }
       } else {
+        // Fallback for non-RPC data source
         final PostgrestResponse<dynamic> response = await Supabase.instance.client.from(widget.config.dataSourceTable).select().range(offset, offset + limit - 1).count(CountOption.exact);
 
         _data.addAll(List<Map<String, dynamic>>.from(response.data ?? []));
         _totalRecords = response.count;
       }
+
+      // Call the callback to update total records in parent
+      widget.config.onTotalRecordsChanged?.call(_totalRecords);
 
       if (!mounted) return;
 
@@ -382,6 +423,9 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         _data.clear();
         _currentFormRecordIndex = -1;
         if (isRefresh || _columns.isEmpty) _columns.clear();
+
+        // Call the callback even on error to reset total records
+        widget.config.onTotalRecordsChanged?.call(_totalRecords);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -389,9 +433,13 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   }
 
   Future<void> handleLoadMoreRows() async {
+    // This is for internal SfDataGrid "load more" button, if used.
+    // Given the external pagination, this might not be strictly needed or could be adapted.
+    // For now, it will simply re-call fetchData which uses the current external page logic.
     if (_data.length < _totalRecords && !_isLoading) {
       appLogger.info("SfDataGrid onLoadMoreRows triggered. Current data length: ${_data.length}, Total records: $_totalRecords");
-      await _fetchData(isRefresh: false);
+      // Trigger a fetch that respects the external pagination logic from ColleghiScreen
+      _fetchData(isRefresh: false);
     } else {
       appLogger.info("SfDataGrid onLoadMoreRows skipped. All data loaded or currently loading.");
     }
@@ -408,7 +456,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     List<GridColumn> cols = [];
     Set<String> addedColumns = {};
 
-    final Map<String, GridColumn> userDefinedColumns = {for (var col in widget.config.columns) col.columnName: col};
+    // final Map<String, GridColumn> userDefinedColumns = {for (var col in widget.config.columns) col.columnName: col};
 
     if (widget.config.selectable) {
       cols.add(GridColumn(
@@ -705,6 +753,13 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
+  // NEW: Implementation for DBGridControl getters
+  @override
+  int get currentFormRecordIndex => _currentFormRecordIndex;
+
+  @override
+  int get totalFormRecords => _data.length; // Or _totalRecords if you want the full count, not just loaded data
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading && _data.isEmpty && _errorMessage.isEmpty) {
@@ -836,7 +891,9 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           gridLinesVisibility: GridLinesVisibility.both,
           headerGridLinesVisibility: GridLinesVisibility.both,
           headerRowHeight: 70.0,
-          key: ValueKey(widget.config.dataSourceTable + _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') + _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_')),
+          key: ValueKey(widget.config.dataSourceTable +
+              (_sortedColumnsState.isNotEmpty ? _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') : '') +
+              (_filterValues.isNotEmpty ? _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_') : '')), // Updated key generation
           loadMoreViewBuilder: (BuildContext context, LoadMoreRows loadMoreRows) => getMoreRows(context, loadMoreRows),
           navigationMode: GridNavigationMode.cell,
           onCellDoubleTap: _handleRowDoubleTap,
