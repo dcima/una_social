@@ -2,8 +2,6 @@
 // ignore_for_file: prefer_final_fields, prefer_const_constructors_in_immutables, library_private_types_in_public_api, depend_on_referenced_packages, avoid_print
 
 import 'dart:async';
-import 'dart:convert';
-import 'package:collection/collection.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -338,11 +336,15 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
 
       if (!mounted) return;
 
+      if (_data.isNotEmpty) {
+        appLogger.info("DBGridWidget: Keys of first fetched record: ${_data.first.keys.toList()}");
+      }
+
       final int startIndexForDecoding = isRefresh ? 0 : _data.length - (rpcResult is Map && rpcResult.containsKey('data') ? ((rpcResult['data']?.length ?? 0) as num).toInt() : (rpcResult is List ? rpcResult.length.toInt() : 0));
       for (int i = startIndexForDecoding; i < _data.length; i++) {
         final Map<String, dynamic> row = _data[i];
         final Map<String, dynamic> newRow = Map.from(row);
-
+/**
         List<dynamic>? decodeJsonbList(dynamic value, String fieldName) {
           if (value is String) {
             try {
@@ -358,7 +360,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           }
           return null;
         }
-
+**/
         _data[i] = newRow;
       }
 
@@ -943,6 +945,8 @@ class _DBGridDataSource extends DataGridSource {
   }
 
   void handleRowSelection(Map<String, dynamic> rowData, {bool isSelected = true}) {
+    appLogger.info("DBGridWidget:  handleRowSelection => isSelected=$isSelected, rowData=$rowData");
+
     if (isSelected) {
       _selectedRowsDataMap.clear();
       _selectedRowsDataMap.add(Map.from(rowData));
@@ -957,15 +961,19 @@ class _DBGridDataSource extends DataGridSource {
   List<DataGridRow> get rows => _dataGridRows;
 
   void _buildDataGridRows() {
+    appLogger.info("_DBGridDataSource: Building DataGridRows from internal data with ${_gridDataInternal.length} records.");
     _dataGridRows = _gridDataInternal.asMap().entries.map((entry) => _buildRowCallback(entry.value, entry.key)).toList();
   }
 
   bool areMapsEqual(Map<String, dynamic> map1, Map<String, dynamic> map2) {
+    appLogger.info("DBGridWidget: areMapsEqual => map1=$map1, map2=$map2");
     return _areMapsEqualCallback(map1, map2);
   }
 
   @override
   DataGridRowAdapter buildRow(DataGridRow row) {
+    appLogger.info("DBGridWidget: buildRow => row=$row");
+
     final int dataGridRowIndex = _dataGridRows.indexOf(row);
     Map<String, dynamic>? originalData;
     if (dataGridRowIndex >= 0 && dataGridRowIndex < _gridDataInternal.length) {
@@ -1007,6 +1015,8 @@ class _DBGridDataSource extends DataGridSource {
   }
 
   void updateDataGridSource(List<Map<String, dynamic>> newData) {
+    appLogger.info("_DBGridDataSource: updateDataGridSource => ${newData.length} new records.");
+
     _gridDataInternal = newData;
     _buildDataGridRows();
     _selectedRowsDataMap.removeWhere((selectedItem) => !_gridDataInternal.any((newItem) => _areMapsEqualCallback(selectedItem, newItem)));
@@ -1015,6 +1025,8 @@ class _DBGridDataSource extends DataGridSource {
   }
 
   bool isAllSelected() {
+    appLogger.info("_DBGridDataSource: isAllSelected");
+
     if (_gridDataInternal.isEmpty) return false;
     for (var item in _gridDataInternal) {
       if (!_selectedRowsDataMap.any((selected) => _areMapsEqualCallback(selected, item))) return false;
@@ -1023,6 +1035,8 @@ class _DBGridDataSource extends DataGridSource {
   }
 
   void selectAllRows(bool select) {
+    appLogger.info("_DBGridDataSource: selectAllRows => select=$select");
+
     if (select) {
       for (var item in _gridDataInternal) {
         if (!_selectedRowsDataMap.any((selected) => _areMapsEqualCallback(selected, item))) {
@@ -1037,6 +1051,8 @@ class _DBGridDataSource extends DataGridSource {
   }
 
   void clearSelections() {
+    appLogger.info("_DBGridDataSource: clearSelections");
+
     _selectedRowsDataMap.clear();
     notifyListeners();
     _onSelectionChanged();
@@ -1046,12 +1062,14 @@ class _DBGridDataSource extends DataGridSource {
   List<Map<String, dynamic>> get selectedRowsData => List.unmodifiable(_selectedRowsDataMap);
 
   Future<void> handleDataGridSort(List<SortColumnDetails> sortColumns) async {
-    appLogger.debug("_DBGridDataSource.handleDataGridSort() called with: $sortColumns");
+    appLogger.info("_DBGridDataSource: handleDataGridSort => sortColumns=$sortColumns");
+
     _onSortRequest(sortColumns);
   }
 
   @override
   Future<void> handleLoadMoreRows() async {
+    appLogger.info("_DBGridDataSource: handleLoadMoreRows");
     WidgetsBinding.instance.addPostFrameCallback((_) {
       fetchDataCallback?.call(false);
     });

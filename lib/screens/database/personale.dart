@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 import 'package:una_social/helpers/db_grid.dart';
 
-class PersonaleScreen extends StatelessWidget {
-  PersonaleScreen({super.key});
+class Personale extends StatelessWidget {
+  Personale({super.key});
 
   final List<GridColumn> columns = [
     GridColumn(

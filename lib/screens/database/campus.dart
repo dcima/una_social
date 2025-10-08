@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
+import 'package:una_social/controllers/ui_controller.dart';
 import 'package:una_social/helpers/db_grid.dart';
 
-class CampusScreen extends StatelessWidget {
-  CampusScreen({super.key});
+class Campus extends StatelessWidget {
+  Campus({super.key});
+  final UiController uiController = Get.find<UiController>();
 
   final List<GridColumn> columns = [
     GridColumn(
@@ -42,7 +45,7 @@ class CampusScreen extends StatelessWidget {
     );
 
     return Scaffold(
-      //appBar: AppBar(title: const Text('Campus')),
+      appBar: AppBar(title: const Text('Campus')),
       body: DBGridWidget(config: dbGridConfig),
     );
   }

@@ -10,6 +10,7 @@ import 'package:una_social/controllers/auth_controller.dart'; // Assumendo che A
 import 'package:una_social/controllers/esterni_controller.dart';
 import 'package:una_social/controllers/personale_controller.dart';
 import 'package:una_social/controllers/profile_controller.dart';
+import 'package:una_social/controllers/ui_controller.dart'; // Aggiunto per inizializzare UiController
 import 'package:una_social/helpers/logger_helper.dart';
 
 const String supabaseUrlEnvKey = 'SUPABASE_URL';
@@ -44,7 +45,7 @@ Future<void> main() async {
         authOptions: const FlutterAuthClientOptions(
           authFlowType: AuthFlowType.pkce,
         ),
-        debug: true,
+        debug: false,
       );
       logInfo("Client Supabase inizializzato.");
 
@@ -57,6 +58,10 @@ Future<void> main() async {
       // Inizializza AuthController molto presto. Questo controller dovrebbe gestire lo stato di autenticazione.
       final AuthController authController = Get.put(AuthController(), permanent: true);
       logInfo("AuthController inizializzato.");
+
+      // Inizializza UiController in modo che sia disponibile per tutta l'app
+      Get.put(UiController(), permanent: true);
+      logInfo("UiController inizializzato.");
 
       // --- Critico: Gestione della validazione iniziale della sessione per ripartenze sporche ---
       // Dopo Supabase.initialize, currentSession potrebbe non essere nullo anche se il refresh token non è valido.

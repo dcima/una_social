@@ -1,3 +1,0 @@
-  select is_super_admin
-  from auth.users
-  where id = auth.uid(); -- auth.uid() è l'ID dell'utente che sta chiamando la funzione

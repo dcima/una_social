@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 import 'package:una_social/helpers/db_grid.dart';
 
-class StruttureScreen extends StatelessWidget {
-  StruttureScreen({super.key});
+class Strutture extends StatelessWidget {
+  Strutture({super.key});
 
   final List<GridColumn> columns = [
     GridColumn(
@@ -44,7 +44,7 @@ class StruttureScreen extends StatelessWidget {
     GridColumn(
       columnName: 'longitudine',
       columnWidthMode: ColumnWidthMode.fill,
-      label: const Text('Loginitudine'),
+      label: const Text('Longitudine'),
     ),
     GridColumn(
       columnName: 'latitudine',
@@ -58,7 +58,7 @@ class StruttureScreen extends StatelessWidget {
     final dbGridConfig = DBGridConfig(
       columns: columns,
       dataSourceTable: 'strutture',
-      emptyDataMessage: "Nessuna struttra trovata.",
+      emptyDataMessage: "Nessuna struttura trovata.",
       fixedColumnsCount: 0,
       initialSortBy: [
         SortColumn(column: 'ente', direction: SortDirection.asc),
@@ -72,7 +72,6 @@ class StruttureScreen extends StatelessWidget {
     );
 
     return Scaffold(
-      //appBar: AppBar(title: const Text('Strutture')),
       body: DBGridWidget(config: dbGridConfig),
     );
   }

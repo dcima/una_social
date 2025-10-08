@@ -1,6 +1,6 @@
 // lib/helpers/db_grid_form_view.dart
 import 'package:flutter/material.dart';
-import 'package:una_social/helpers/db_grid.dart'; // IMPORTANT: This is the SOLE source for DBGridControl and UIMode
+import 'package:una_social/helpers/db_grid.dart';
 //import 'package:una_social/helpers/logger_helper.dart'; // Only for logger, not for types like DBGridControl
 
 class DBGridFormView extends StatelessWidget {
@@ -50,7 +50,7 @@ class DBGridFormView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  "Dettaglio Record", // Generic title
+                  'Dettaglio Record', // Generic title
                   style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),

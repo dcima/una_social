@@ -1,260 +1,169 @@
-// lib/app_router.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import 'package:go_router/go_router.dart';
+import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-// Screen Imports
-import 'package:una_chat/screens/una_chat_main_screen.dart';
-import 'package:una_social/screens/colleghi_screen.dart';
-// NOTA: Usa i percorsi relativi corretti per il tuo progetto
-
-import 'package:una_social/screens/database/strutture.dart';
-import 'package:una_social/screens/database_screen.dart';
+import 'package:una_social/screens/contatti/import_contacts_screen.dart';
 import 'package:una_social/screens/database/ambiti.dart';
 import 'package:una_social/screens/database/campus.dart';
+import 'package:una_social/screens/database/database_screen.dart';
 import 'package:una_social/screens/database/docenti_inesistenti.dart';
+import 'package:una_social/screens/database/esterni.dart';
+import 'package:una_social/screens/database/groups.dart';
 import 'package:una_social/screens/database/personale.dart';
+import 'package:una_social/screens/database/strutture.dart';
 import 'package:una_social/screens/home_screen.dart';
-import 'package:una_social/screens/import_contacts_screen.dart';
-import 'package:una_social/screens/login_screen.dart';
-import 'package:una_social/screens/set_password_screen.dart';
-import 'package:una_social/screens/splash_screen.dart';
-
-// Controller Imports
-import 'package:una_social/controllers/auth_controller.dart';
-import 'package:una_social/controllers/profile_controller.dart';
 import 'package:una_social/controllers/ui_controller.dart';
+import 'package:una_social/screens/login_screen.dart';
 
-// Helper Imports
-import 'package:una_social/helpers/logger_helper.dart';
-
-final _supabase = Supabase.instance.client;
-final AuthController authController = Get.find<AuthController>();
-final ProfileController profileController = Get.find<ProfileController>();
-final UiController uiController = Get.put<UiController>(UiController());
-
-class GoRouterRefreshStream extends ChangeNotifier {
-  late final StreamSubscription<AuthState> _subscription;
-  bool _isDisposed = false;
-
-  GoRouterRefreshStream(Stream<AuthState> stream) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_isDisposed) _safeNotifyListeners(); // Usa la funzione con ritardo
-    });
-    _subscription = stream.asBroadcastStream().listen((AuthState data) {
-      if (!_isDisposed) _safeNotifyListeners(); // Usa la funzione con ritardo
-    }, onError: (error) {
-      if (!_isDisposed) _safeNotifyListeners(); // Usa la funzione con ritardo
-    });
-  }
-
-  // Nuova funzione per ritardare la notifica ai listener del router
-  void _safeNotifyListeners() {
-    // Ritarda leggermente la notifica per permettere alle operazioni UI in corso
-    // (come la chiusura di un popup) di completarsi prima che il router
-    // inizi una nuova navigazione.
-    Future.delayed(const Duration(milliseconds: 50), () {
-      if (!_isDisposed) {
-        notifyListeners();
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    if (!_isDisposed) {
-      _isDisposed = true;
-      _subscription.cancel();
-      super.dispose();
-    }
-  }
-}
-
-// L'enum può essere semplificato se usi i nomi come stringhe
 enum AppRoute {
-  importContacts,
-  colleghi,
+  login('/login'),
+  home('/app/home'),
+  database('/app/database'),
+  chat('/app/chat'),
+  ambiti('/app/ambiti'),
+  importContacts('/app/import-contacts'),
+  colleghi('/app/colleghi'),
+  ;
+
+  const AppRoute(this.path);
+  final String path;
 }
 
 class AppRouter {
-  static final _shellNavigatorKey = GlobalKey<NavigatorState>();
+  static final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
+  static final GlobalKey<NavigatorState> _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
-  static final List<GoRoute> publicRoutes = [
-    GoRoute(path: '/splash', name: 'splash', builder: (context, state) => const SplashScreen()),
-    GoRoute(path: '/login', name: 'login', builder: (context, state) => const LoginScreen()),
-    GoRoute(path: '/set-password', name: 'set-password', builder: (context, state) => const SetPasswordScreen()),
-  ];
-
-  static final List<GoRoute> superAdminRoutes = [
-    GoRoute(
-        path: '/app/ambiti',
-        name: 'ambiti',
-        builder: (context, state) => HomeScreen(
-              screenName: "Ambiti",
-              child: AmbitiScreen(),
-            ),
-        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(
-        path: '/app/campus',
-        name: 'campus',
-        builder: (context, state) => HomeScreen(
-              screenName: "Campus",
-              child: CampusScreen(),
-            ),
-        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(
-        path: '/app/database',
-        name: 'database',
-        builder: (context, state) => HomeScreen(
-              screenName: "Database",
-              child: DatabaseScreen(),
-            ),
-        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(
-        path: '/app/docenti_inesistenti',
-        name: 'docenti_inesistenti',
-        builder: (context, state) => HomeScreen(screenName: "Docenti inesistenti", child: DocentiInesistentiScreen()),
-        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(
-        path: '/app/personale',
-        name: 'personale',
-        builder: (context, state) => HomeScreen(
-              screenName: "Personale",
-              child: PersonaleScreen(),
-            ),
-        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-    GoRoute(
-        path: '/app/strutture',
-        name: 'strutture',
-        builder: (context, state) => HomeScreen(
-              screenName: "Strutture",
-              child: StruttureScreen(),
-            ),
-        redirect: (context, state) async => await authController.checkIsSuperAdmin() ? null : '/app/home'),
-  ];
-
-  static FutureOr<String?> _socialRedirect(BuildContext context, GoRouterState state) async {
-    await profileController.checkUserRelationships();
-    if (!profileController.hasAcceptedRelationships.value) {
-      logInfo("[Router Social] Utente senza contatti. Reindirizzo da ${state.matchedLocation} a /app/import-contacts");
-      return '/app/import-contacts'; // Restituisci il percorso come stringa per il redirect
-    }
-    logInfo("[Router Social] Utente con contatti. Accesso a ${state.matchedLocation} consentito.");
-    return null;
-  }
+  // *** NUOVA VARIABILE STATICA PER TRACCIARE L'ULTIMO PERCORSO DEI BREADCRUMBS ***
+  static String? _lastBreadcrumbPath;
 
   static final GoRouter router = GoRouter(
-    initialLocation: '/splash',
-    debugLogDiagnostics: true, // UTILISSIMO per debuggare, lascialo attivo per ora
-    refreshListenable: GoRouterRefreshStream(_supabase.auth.onAuthStateChange),
-    routes: [
-      ...publicRoutes,
-      ...superAdminRoutes,
+    navigatorKey: _rootNavigatorKey,
+    initialLocation: AppRoute.login.path,
+    debugLogDiagnostics: true,
+    refreshListenable: GoRouterRefreshStream(Supabase.instance.client.auth.onAuthStateChange),
+    redirect: (BuildContext context, GoRouterState state) {
+      final bool loggedIn = Supabase.instance.client.auth.currentUser != null;
+      final bool loggingIn = state.matchedLocation == AppRoute.login.path;
 
+      if (!loggedIn) {
+        // Se non loggato e non sta andando alla pagina di login, reindirizza al login
+        return loggingIn ? null : AppRoute.login.path;
+      }
+
+      // Se loggato e sta cercando di accedere alla pagina di login, reindirizza alla home
+      if (loggingIn) {
+        return AppRoute.home.path;
+      }
+
+      // Se il percorso cambia a una rotta non-app (es. /login), resetta il tracker
+      if (!state.uri.toString().startsWith('/app')) {
+        _lastBreadcrumbPath = null;
+      }
+
+      return null;
+    },
+    routes: [
       GoRoute(
-        path: '/app/import-contacts', // Il percorso ora corrisponde a quello del redirect
-        name: AppRoute.importContacts.name,
-        builder: (context, state) => HomeScreen(screenName: "Importa contatti", child: ImportContactsScreen()),
+        path: AppRoute.login.path,
+        builder: (context, state) => const LoginScreen(),
+      ),
+      ShellRoute(
+        navigatorKey: _shellNavigatorKey,
+        builder: (context, state, child) {
+          final UiController uiController = Get.find<UiController>();
+          final currentFullPath = state.uri.toString(); // Ottieni il percorso completo attuale
+
+          // *** APPLICAZIONE DELLA LOGICA DI CONTROLLO ***
+          // Schedula l'aggiornamento dei breadcrumbs solo se il percorso è cambiato
+          if (_lastBreadcrumbPath != currentFullPath) {
+            _lastBreadcrumbPath = currentFullPath; // Aggiorna l'ultimo percorso tracciato
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              uiController.updateBreadcrumbs(UiController.buildBreadcrumbsFromPath(currentFullPath));
+            });
+          }
+          // *** FINE LOGICA DI CONTROLLO ***
+
+          return HomeScreen(
+            child: child,
+          );
+        },
         routes: [
-          // La rotta figlia è definita correttamente qui
           GoRoute(
-            path: 'colleghi', // Il percorso completo sarà /app/import-contacts/colleghi
+            path: AppRoute.home.path,
+            builder: (context, state) => const Center(child: Text('Contenuto della Home')),
+          ),
+          GoRoute(
+            path: AppRoute.database.path,
+            builder: (context, state) => const DatabaseScreen(),
+          ),
+          GoRoute(
+            path: AppRoute.chat.path,
+            builder: (context, state) => const Center(child: Text('Schermata Chat')),
+          ),
+          GoRoute(
+            path: AppRoute.ambiti.path,
+            builder: (context, state) => const Ambiti(),
+          ),
+          GoRoute(
+            path: AppRoute.importContacts.path,
+            name: AppRoute.importContacts.name,
+            builder: (context, state) => const ImportContactsScreen(),
+          ),
+          GoRoute(
+            path: AppRoute.colleghi.path,
             name: AppRoute.colleghi.name,
+            builder: (context, state) => const Center(child: Text('Schermata Colleghi')),
+          ),
+          GoRoute(
+            path: '${AppRoute.database.path}/:tableName',
             builder: (context, state) {
-              uiController.setCurrentScreenName("Colleghi"); // Titolo predefinito per Colleghi, sarà aggiornato dalla schermata
-              return HomeScreen(screenName: "Colleghi", child: ColleghiScreen());
+              final tableName = state.pathParameters['tableName']!;
+              switch (tableName.toLowerCase()) {
+                case 'ambiti':
+                  return Ambiti();
+                case 'campus':
+                  return Campus();
+                case 'docenti_inesistenti':
+                  return DocentiInesistenti();
+                case 'esterni':
+                  return Esterni();
+                case 'groups':
+                  return Groups();
+                case 'personale':
+                  return Personale();
+                case 'strutture':
+                  return Strutture();
+                default:
+                  return Center(
+                    child: Text('Schermata di gestione per la tabella: ${_capitalize(tableName)}'),
+                  );
+              }
             },
           ),
         ],
       ),
-
-      // ShellRoute per le schermate principali che condividono la UI (HomeScreen)
-      ShellRoute(
-        navigatorKey: _shellNavigatorKey,
-        builder: (context, state, child) {
-          // Imposta il titolo predefinito per le schermate interne alla ShellRoute
-          final screenNameFromRoute = state.topRoute?.name ?? 'Home';
-          uiController.setCurrentScreenName(screenNameFromRoute.capitalizeFirst.toString()); // Utilizza capitalizeFirst per una buona formattazione
-          return HomeScreen(screenName: screenNameFromRoute.capitalizeFirst.toString(), child: child);
-        },
-        routes: [
-          // Le rotte figlie della ShellRoute.
-          // La rotta 'import-contacts' è stata rimossa da qui.
-          GoRoute(
-            path: '/app/home',
-            name: 'home',
-            builder: (context, state) => const Center(child: Text('Contenuto principale della Home')),
-          ),
-          GoRoute(
-            path: '/app/chat',
-            name: 'chat',
-            builder: (context, state) => HomeScreen(screenName: "Chat", child: UnaChatMainScreen()),
-            redirect: _socialRedirect,
-          ),
-        ],
-      ),
     ],
-    redirect: (BuildContext context, GoRouterState state) {
-      // ... Il tuo redirect globale rimane invariato ...
-      final user = _supabase.auth.currentUser;
-      final bool loggedIn = user != null;
-      final bool passwordSet = user?.userMetadata?['has_set_password'] as bool? ?? false;
-      final String location = state.matchedLocation;
-
-      logInfo('[GoRouter Global] Evaluating: Path="$location", LoggedIn=$loggedIn, PasswordSet=$passwordSet');
-
-      if (loggedIn && !passwordSet) {
-        if (location != '/set-password') {
-          logInfo('[GoRouter Global] Redirect: Loggato ma password non impostata. Forzo -> /set-password');
-          return '/set-password';
-        }
-        return null;
-      }
-
-      if (loggedIn && passwordSet) {
-        final bool onSetupOrPublicPath = location == '/splash' || location == '/login' || location == '/set-password' || location == '/';
-        if (onSetupOrPublicPath) {
-          logInfo('[GoRouter Global] Redirect: Utente autenticato su pagina pubblica. Forzo -> /app/home');
-          return '/app/home';
-        }
-      }
-
-      if (!loggedIn) {
-        final bool isPublicPath = publicRoutes.any((route) => route.path == location);
-        if (!isPublicPath && location != '/unauthorized') {
-          logInfo('[GoRouter Global] Redirect: Non loggato su pagina protetta. Forzo -> /login');
-          return '/login';
-        }
-      }
-
-      logInfo('[GoRouter Global] Nessun redirect necessario.');
-      return null;
-    },
-    errorBuilder: (context, state) {
-      // ... Il tuo errorBuilder rimane invariato ...
-      logError('[GoRouter ErrorBuilder] URI: ${state.uri}, Errore: ${state.error}');
-      return Scaffold(
-        appBar: AppBar(title: const Text('Errore Navigazione')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Pagina non trovata o errore del router.', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 16),
-                Text('Percorso Richiesto: ${state.uri}', textAlign: TextAlign.center),
-                if (state.error != null) ...[
-                  const SizedBox(height: 8),
-                  Text('Dettagli Errore: ${state.error}', textAlign: TextAlign.center),
-                ]
-              ],
-            ),
-          ),
-        ),
-      );
-    },
+    errorBuilder: (context, state) => Scaffold(
+      appBar: AppBar(title: const Text('Errore')),
+      body: Center(child: Text('Pagina non trovata: ${state.uri}')),
+    ),
   );
+
+  static String _capitalize(String s) => s.isNotEmpty ? s[0].toUpperCase() + s.substring(1).replaceAll('_', ' ') : '';
+}
+
+class GoRouterRefreshStream extends ChangeNotifier {
+  GoRouterRefreshStream(Stream<AuthState> stream) {
+    notifyListeners();
+    _subscription = stream.listen((_) => notifyListeners());
+  }
+
+  late final StreamSubscription<AuthState> _subscription;
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
+  }
 }

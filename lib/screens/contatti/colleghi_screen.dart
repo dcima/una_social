@@ -1,4 +1,4 @@
-// lib/screens/colleghi_screen.dart
+// lib/screens/contatti/colleghi_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -6,7 +6,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 import 'package:una_social/controllers/auth_controller.dart';
 import 'package:una_social/controllers/personale_controller.dart';
-import 'package:una_social/controllers/ui_controller.dart';
 import 'package:una_social/helpers/db_grid.dart';
 import 'package:una_social/helpers/logger_helper.dart';
 import 'package:una_social/helpers/snackbar_helper.dart';
@@ -32,7 +31,8 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   List<Map<String, dynamic>> _struttureList = []; // Will hold structures for the selected Ente, including "Tutte le strutture"
 
   final AuthController authController = Get.find<AuthController>();
-  final UiController uiController = Get.find<UiController>();
+  // Rimosso l'istanza di UiController da qui, non è più necessaria per initState.
+  // La gestione dei breadcrumbs è centralizzata in AppRouter.
   final PersonaleController personaleController = Get.find<PersonaleController>();
 
   // Controllers for text fields (for display purposes)
@@ -49,8 +49,8 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   String? _currentFilterValue;
 
   // State for sorting
-  String _currentSortColumn = 'cognome';
-  String _currentSortDirection = 'asc';
+  final String _currentSortColumn = 'cognome';
+  final String _currentSortDirection = 'asc';
 
   // Grid columns definition
   final List<GridColumn> columns = [
@@ -63,9 +63,9 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   @override
   void initState() {
     super.initState();
-    uiController.setCurrentScreenName('Colleghi: Caricamento...');
-    // Initialize dropdowns based on user profile or defaults
     _initializeDropdowns();
+    // Rimosso: uiController.updateBreadcrumbs(UiController.buildBreadcrumbsFromPath('/app/colleghi'));
+    // L'aggiornamento dei breadcrumbs è gestito centralmente dal ShellRoute in app_router.dart
   }
 
   @override
@@ -75,31 +75,11 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     super.dispose();
   }
 
-  // Resets the screen to its initial or empty state
-  void _resetScreenState() {
-    setState(() {
-      isLoading = false;
-      _isLoadingDropdowns = false;
-      _selectedEnte = null;
-      _selectedStrutturaId = null;
-      _selectedStrutturaNome = null;
-      _entiList = [];
-      _struttureList = [];
-      _currentPage = 0;
-      _totalRecords = 0;
-      _currentFilterValue = null;
-      _currentSortColumn = 'cognome';
-      _currentSortDirection = 'asc';
-      _enteController.clear();
-      _strutturaController.clear();
-    });
-    uiController.setCurrentScreenName('Colleghi: Nessun Dati');
-  }
-
   // Initializes dropdowns based on user's profile or defaults
   Future<void> _initializeDropdowns() async {
     if (!mounted) return;
 
+    // Set initial loading state and title
     setState(() {
       isLoading = true;
       _isLoadingDropdowns = true;
@@ -116,23 +96,21 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       userProfileStrutturaId = personaleController.personale.value!.struttura as int?;
     }
 
-    // Set _selectedEnte: user's ente if exists, otherwise 'Tutti gli enti'
     _selectedEnte = userProfileEnte ?? 'Tutti gli enti';
     _enteController.text = _selectedEnte!;
 
-    // Ensure "Tutte le strutture" is always the first option
     _struttureList.clear();
-
-    // Fetch structures for the resolved _selectedEnte
     if (_selectedEnte != 'Tutti gli enti') {
       await _fetchStrutture(_selectedEnte!);
     } else {
-      await _fetchStrutture(null);
+      await _fetchStrutture(null); // Fetch all structures if "Tutti gli enti" is selected
     }
 
-    _struttureList.insert(0, {'id': -1, 'nome': 'Tutte le strutture'});
+    // Ensure "Tutte le strutture" is always the first option and unique
+    if (_struttureList.where((s) => s['id'] == -1).isEmpty) {
+      _struttureList.insert(0, {'id': -1, 'nome': 'Tutte le strutture'});
+    }
 
-    // Set _selectedStrutturaId: user's structure if found and valid for selected ente, otherwise -1
     if (userProfileStrutturaId != null && userProfileStrutturaId != -1) {
       final structure = _struttureList.firstWhereOrNull((s) => s['id'] == userProfileStrutturaId);
       if (structure != null) {
@@ -140,35 +118,26 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
         _selectedStrutturaNome = structure['nome'] as String?;
         _strutturaController.text = "$userProfileStrutturaId - $_selectedStrutturaNome";
       } else {
-        // User's structure not found in the list (e.g., belongs to a different ente), default to 'Tutte le strutture'
         _selectedStrutturaId = -1;
         _selectedStrutturaNome = 'Tutte le strutture';
         _strutturaController.text = "Tutte le strutture";
       }
     } else {
-      // No user structure or it's -1, default to 'Tutte le strutture'
       _selectedStrutturaId = -1;
       _selectedStrutturaNome = 'Tutte le strutture';
       _strutturaController.text = "Tutte le strutture";
     }
 
+    // _updateScreenTitle() è stato rimosso in quanto il titolo della AppBar
+    // è ora gestito dai breadcrumbs di HomeScreen tramite UiController.
+    // Se la logica del titolo dinamico fosse necessaria per un display interno
+    // al ColleghiScreen, andrebbe utilizzata qui per una variabile di stato locale.
+
+    // Update the UI controller with the final title and set loading to false in one go.
     setState(() {
       isLoading = false;
       _isLoadingDropdowns = false;
     });
-    _fetchColleagues(); // Fetch initial data based on resolved selections
-  }
-
-  // Handles errors during data fetching or initialization
-  void _handleError(String message) {
-    if (mounted) {
-      SnackbarHelper.showErrorSnackbar(context, message);
-      setState(() {
-        isLoading = false;
-        _isLoadingDropdowns = false;
-      });
-      uiController.setCurrentScreenName('Colleghi: Errore');
-    }
   }
 
   // Fetches the list of entities (Enti)
@@ -188,19 +157,19 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
 
   // Fetches structures for a given entity (Ente)
   Future<void> _fetchStrutture(String? ente) async {
-    var response;
-
+    List<Map<String, dynamic>> fetchedStructures = [];
     try {
       if (ente != null) {
-        response = await Supabase.instance.client.from('strutture').select('id, nome').eq('ente', ente).order('nome');
+        final response = await Supabase.instance.client.from('strutture').select('id, nome').eq('ente', ente).order('nome');
+        fetchedStructures = (response as List<dynamic>).cast<Map<String, dynamic>>();
       } else {
-        response = await Supabase.instance.client.from('strutture').select('id, nome').order('nome');
+        final response = await Supabase.instance.client.from('strutture').select('id, nome').order('nome');
+        fetchedStructures = (response as List<dynamic>).cast<Map<String, dynamic>>();
       }
 
       if (mounted) {
         setState(() {
-          _struttureList = (response as List<dynamic>).cast<Map<String, dynamic>>();
-          // Ensure "Tutte le strutture" is always the first option and unique
+          _struttureList = fetchedStructures;
           if (_struttureList.where((s) => s['id'] == -1).isEmpty) {
             _struttureList.insert(0, {'id': -1, 'nome': 'Tutte le strutture'});
           }
@@ -211,7 +180,6 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       if (mounted) SnackbarHelper.showErrorSnackbar(context, 'Errore nel caricamento delle strutture.');
       if (mounted) {
         setState(() {
-          // Clear and reset on error
           _struttureList = [];
           _struttureList.insert(0, {'id': -1, 'nome': 'Tutte le strutture'});
         });
@@ -219,33 +187,17 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     }
   }
 
-  // Updates screen title and ensures loading states are managed.
-  // This function's state changes will trigger DBGridWidget re-evaluation via ValueKey.
-  void _fetchColleagues() {
-    String screenTitle = 'Colleghi';
-    if (_selectedEnte != null && _selectedEnte != 'Tutti gli enti') {
-      screenTitle = 'Colleghi: $_selectedEnte';
-      if (_selectedStrutturaNome != null && _selectedStrutturaNome != 'Tutte le strutture') {
-        screenTitle += ' - $_selectedStrutturaNome';
-      }
-    } else if (_selectedStrutturaNome != null && _selectedStrutturaNome != 'Tutte le strutture') {
-      screenTitle = 'Colleghi: $_selectedStrutturaNome';
-    }
-    uiController.setCurrentScreenName(screenTitle);
-
-    setState(() {
-      isLoading = false;
-    }); // Initial setup loading is done.
-  }
+  // _updateScreenTitle() è stato rimosso, in quanto il titolo della AppBar
+  // è ora gestito dai breadcrumbs di HomeScreen tramite UiController.
+  // Se la logica del titolo dinamico fosse necessaria per un display interno
+  // al ColleghiScreen, andrebbe utilizzata qui per una variabile di stato locale.
 
   // Resets to the first page and triggers state update.
-  // This will cause DBGridWidget to refetch data with the new state.
   void _refreshData() {
     setState(() {
       _currentPage = 0; // Reset to the first page
-      // No explicit fetch needed, changing _currentPage will update the key and trigger DBGridWidget
     });
-    _fetchColleagues(); // Update title
+    // Rimosso: _updateScreenTitle(); // Non più necessario qui per l'AppBar
   }
 
   // Handler for Ente dropdown changes
@@ -256,7 +208,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       _selectedEnte = newValue;
       _selectedStrutturaId = null; // Reset structure selection
       _selectedStrutturaNome = null;
-      _struttureList = []; // Clear current structures
+      _struttureList = []; // Clear current structures (will be refetched by _fetchStrutture)
       _strutturaController.clear();
       _currentPage = 0; // Reset page to 0
     });
@@ -264,29 +216,25 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     _enteController.text = newValue;
 
     if (newValue == 'Tutti gli enti') {
-      // If "Tutti gli enti" is selected, set default "Tutte le strutture"
-      _struttureList.clear();
-      _struttureList.insert(0, {'id': -1, 'nome': 'Tutte le strutture'});
+      await _fetchStrutture(null); // Fetch all structures
       _selectedStrutturaId = -1;
       _selectedStrutturaNome = 'Tutte le strutture';
       _strutturaController.text = "Tutte le strutture";
     } else {
-      await _fetchStrutture(newValue);
+      await _fetchStrutture(newValue); // Fetch structures for the selected ente
       if (_struttureList.where((s) => s['id'] == -1).isEmpty) {
         _struttureList.insert(0, {'id': -1, 'nome': 'Tutte le strutture'});
       }
-      if (_selectedStrutturaId == null || _selectedStrutturaId == -1) {
+      if (_selectedStrutturaId == null || _selectedStrutturaId == -1 || !_struttureList.any((s) => s['id'] == _selectedStrutturaId)) {
         _selectedStrutturaId = -1;
         _selectedStrutturaNome = 'Tutte le strutture';
         _strutturaController.text = "Tutte le strutture";
       } else {
-        // If a previously selected structure is still valid, keep it.
         final structure = _struttureList.firstWhereOrNull((s) => s['id'] == _selectedStrutturaId);
         if (structure != null) {
           _selectedStrutturaNome = structure['nome'] as String?;
           _strutturaController.text = "$_selectedStrutturaId - $_selectedStrutturaNome";
         } else {
-          // If previously selected structure is invalid, reset to default.
           _selectedStrutturaId = -1;
           _selectedStrutturaNome = 'Tutte le strutture';
           _strutturaController.text = "Tutte le strutture";
@@ -296,25 +244,23 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     _refreshData(); // Trigger state update, causing DBGridWidget to refetch
   }
 
-  // Handler for Struttura dropdown changes
-  void _onStrutturaChanged(int? newValue) async {
-    if (newValue == null) return;
+  // Handler for Struttura selection changes (from Autocomplete)
+  void _onStrutturaSelected(Map<String, dynamic> selectedStructure) {
+    final int? newId = selectedStructure['id'] as int?;
+    final String? newName = selectedStructure['nome'] as String?;
+
+    if (newId == null || newName == null) return;
 
     setState(() {
-      _selectedStrutturaId = newValue;
-      if (newValue == -1) {
-        _selectedStrutturaNome = 'Tutte le strutture';
-      } else {
-        _selectedStrutturaNome = _struttureList.firstWhereOrNull((s) => s['id'] == newValue)?['nome'] as String?;
-      }
+      _selectedStrutturaId = newId;
+      _selectedStrutturaNome = newName;
       _currentPage = 0; // Reset page to 0 when Struttura changes
     });
 
-    // Update the text controller for display
-    if (newValue == -1) {
+    if (newId == -1) {
       _strutturaController.text = "Tutte le strutture";
     } else {
-      _strutturaController.text = "$newValue - $_selectedStrutturaNome";
+      _strutturaController.text = "$newId - $newName";
     }
     _refreshData(); // Trigger state update
   }
@@ -325,7 +271,6 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       setState(() {
         _currentPage--;
       });
-      // The ValueKey change will trigger DBGridWidget to refetch data
     }
   }
 
@@ -336,7 +281,6 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       setState(() {
         _currentPage++;
       });
-      // The ValueKey change will trigger DBGridWidget to refetch data
     }
   }
 
@@ -345,7 +289,6 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     if (mounted) {
       setState(() {
         _totalRecords = totalRecords;
-        // Ensure current page is valid if total records change
         final int totalPages = (_totalRecords / _pageSize).ceil();
         if (_currentPage >= totalPages && totalPages > 0) {
           _currentPage = totalPages - 1;
@@ -379,28 +322,134 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     );
   }
 
-  // Builds the Struttura dropdown widget
-  Widget getStrutturaDropdown(String? ente) {
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: "Struttura",
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          isExpanded: true,
-          value: _selectedStrutturaId,
-          hint: const Text("Seleziona Struttura"),
-          items: _struttureList.map((s) {
-            final id = s['id'] as int;
-            final nome = s['nome'].toString();
-            return DropdownMenuItem<int>(value: id, child: Text("$id - $nome"));
-          }).toList(),
-          // Disable dropdown if "Tutti gli enti" is selected AND it's not the user's default ente
-          onChanged: _selectedEnte == null || _selectedEnte == 'Tutti gli enti' ? null : _onStrutturaChanged,
-        ),
-      ),
+  // Builds the Struttura Autocomplete widget
+  Widget getStrutturaAutocomplete() {
+    return Autocomplete<Map<String, dynamic>>(
+      key: ValueKey('struttura_autocomplete_$_selectedEnte'), // Key to force rebuild when ente changes
+      fieldViewBuilder: (BuildContext context, TextEditingController textEditingController, FocusNode focusNode, VoidCallback onFieldSubmitted) {
+        _strutturaController.value = textEditingController.value;
+        textEditingController.addListener(() {
+          if (_strutturaController.text != textEditingController.text) {
+            _strutturaController.text = textEditingController.text;
+          }
+        });
+
+        return TextFormField(
+          controller: textEditingController,
+          focusNode: focusNode,
+          decoration: InputDecoration(
+            labelText: "Struttura",
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            suffixIcon: textEditingController.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear, size: 20),
+                    onPressed: () {
+                      textEditingController.clear();
+                      _onStrutturaSelected({'id': -1, 'nome': 'Tutte le strutture'});
+                      focusNode.unfocus();
+                    },
+                  )
+                : null,
+          ),
+          onFieldSubmitted: (String value) {
+            final matchingOption = _struttureList.firstWhereOrNull((s) =>
+                (s['id'] != null && s['id'].toString() == value) ||
+                (s['nome'] != null && s['nome'].toString().toLowerCase() == value.toLowerCase()) ||
+                (s['id'] != null && s['nome'] != null && "${s['id']} - ${s['nome']}".toLowerCase() == value.toLowerCase()));
+            if (matchingOption != null) {
+              _onStrutturaSelected(matchingOption);
+            } else {
+              _onStrutturaSelected({'id': -1, 'nome': 'Tutte le strutture'});
+            }
+            onFieldSubmitted();
+          },
+        );
+      },
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        if (textEditingValue.text.isEmpty) {
+          return _struttureList;
+        }
+
+        final String searchText = textEditingValue.text.toLowerCase();
+        final bool hasDigits = searchText.contains(RegExp(r'\d'));
+
+        final List<Map<String, dynamic>> suggestions = [];
+        final Map<String, dynamic> tutteLeStrutture = {'id': -1, 'nome': 'Tutte le strutture'};
+
+        if (tutteLeStrutture['nome'].toString().toLowerCase().contains(searchText)) {
+          suggestions.add(tutteLeStrutture);
+        }
+
+        if (hasDigits && searchText.isNotEmpty) {
+          final int? searchId = int.tryParse(searchText);
+          if (searchId != null) {
+            suggestions.addAll(_struttureList.where((s) => s['id'] != -1 && s['id'] == searchId));
+          }
+        } else if (searchText.length >= 3) {
+          suggestions.addAll(_struttureList.where((s) => s['id'] != -1 && s['nome'].toString().toLowerCase().contains(searchText)));
+        }
+
+        final uniqueSuggestions = <Map<String, dynamic>>[];
+        final Set<int> seenIds = <int>{};
+        for (var s in suggestions) {
+          if (s['id'] == -1) {
+            if (!uniqueSuggestions.any((us) => us['id'] == -1)) {
+              uniqueSuggestions.insert(0, s);
+            }
+          } else if (!seenIds.contains(s['id'])) {
+            uniqueSuggestions.add(s);
+            seenIds.add(s['id'] as int);
+          }
+        }
+
+        uniqueSuggestions.sort((a, b) {
+          if (a['id'] == -1) return -1;
+          if (b['id'] == -1) return 1;
+          return (a['nome'] as String).toLowerCase().compareTo((b['nome'] as String).toLowerCase());
+        });
+
+        return uniqueSuggestions;
+      },
+      displayStringForOption: (Map<String, dynamic> option) {
+        final id = option['id'] as int;
+        final nome = option['nome'].toString();
+        if (id == -1) {
+          return nome;
+        }
+        return "$id - $nome";
+      },
+      onSelected: _onStrutturaSelected,
+      optionsViewBuilder: (BuildContext context, AutocompleteOnSelected<Map<String, dynamic>> onSelected, Iterable<Map<String, dynamic>> options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4.0,
+            child: SizedBox(
+              height: options.isNotEmpty ? 200.0 : 0,
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                itemCount: options.length,
+                itemBuilder: (BuildContext context, int index) {
+                  final Map<String, dynamic> option = options.elementAt(index);
+                  return InkWell(
+                    onTap: () {
+                      onSelected(option);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        option['id'] == -1 ? option['nome'].toString() : "${option['id']} - ${option['nome']}",
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -418,7 +467,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
           const SizedBox(width: 16),
           Expanded(flex: 2, child: getEnteDropdown()),
           const SizedBox(width: 16),
-          Expanded(flex: 3, child: getStrutturaDropdown(_selectedEnte)),
+          Expanded(flex: 3, child: getStrutturaAutocomplete()),
           if (_isLoadingDropdowns)
             Padding(
               padding: const EdgeInsets.only(left: 16.0),
@@ -432,37 +481,29 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
   // --- Main Build Method ---
   @override
   Widget build(BuildContext context) {
-    // Determine overall loading state: initial setup or dropdown loading
     final bool showInitialLoading = isLoading || _isLoadingDropdowns;
 
-    // Handle case where user is logged in but personal data hasn't loaded yet.
     if (showInitialLoading && (personaleController.personale.value == null && Supabase.instance.client.auth.currentUser != null)) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      // Usiamo un Center con CircularProgressIndicator perché lo Scaffold è fornito dal parent.
+      return const Center(child: CircularProgressIndicator());
     }
 
-    // Handle case where user is not logged in or personal data is unavailable
     if (personaleController.personale.value == null) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              authController.isPersonale ? 'Errore: Dati del personale non disponibili. Tentare di ricaricare l\'app o contattare il supporto.' : 'Questa sezione è riservata al personale universitario.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.error),
-            ),
+      // Usiamo un Center con Text perché lo Scaffold è fornito dal parent.
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            authController.isPersonale ? 'Errore: Dati del personale non disponibili. Tentare di ricaricare l\'app o contattare il supporto.' : 'Questa sezione è riservata al personale universitario.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.error),
           ),
         ),
       );
     }
 
-    // Construct RPC parameters for DBGridConfig
-    // Crucially, include all parameters expected by the Supabase function,
-    // passing null or default values if they are not specifically filtered by.
     final Map<String, dynamic> rpcParams = {
-      // Always pass p_ente, default to null if 'Tutti gli enti' is selected
       'p_ente': (_selectedEnte != null && _selectedEnte != 'Tutti gli enti') ? _selectedEnte : null,
-      // Always pass p_struttura_id, default to null if -1 is selected
       'p_struttura_id': (_selectedStrutturaId != null && _selectedStrutturaId != -1) ? _selectedStrutturaId : null,
       'p_filter_column': _currentFilterColumn,
       'p_filter_value': _currentFilterValue,
@@ -472,72 +513,62 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       'p_order_direction': _currentSortDirection,
     };
 
-    // Configure the DBGridWidget
     final dbGridConfig = DBGridConfig(
       columns: columns,
-      dataSourceTable: 'colleghi', // Required parameter
+      dataSourceTable: 'colleghi',
       emptyDataMessage: "Nessun collega trovato per i criteri selezionati.",
-      excludeColumns: ['ente', 'struttura'], // Columns not to display in the grid
+      excludeColumns: ['ente', 'struttura'],
       fixedColumnsCount: 1,
       initialSortBy: [
         SortColumn(column: _currentSortColumn, direction: _currentSortDirection == 'asc' ? SortDirection.asc : SortDirection.desc),
       ],
-      pageLength: _pageSize, // Use the page length from state
+      pageLength: _pageSize,
       primaryKeyColumns: ['id'],
       rpcFunctionName: 'get_colleagues_by_struttura',
-      rpcFunctionParams: rpcParams, // Pass the constructed RPC parameters
-
+      rpcFunctionParams: rpcParams,
       selectable: true,
       showHeader: true,
-      uiModes: const [UIMode.grid], // Default UI mode
-      onTotalRecordsChanged: _onDBGridTotalRecordsChanged, // NEW: Pass the callback
+      uiModes: const [UIMode.grid],
+      onTotalRecordsChanged: _onDBGridTotalRecordsChanged,
     );
 
-    // --- Dynamic Key Strategy ---
-    // Construct a key string from all parameters that influence data fetching.
-    // When this string changes, Flutter will re-create the DBGridWidget,
-    // forcing a re-initialization and data fetch.
     final String dynamicKeyString = '${_selectedEnte}_${_selectedStrutturaId}_${_currentPage}_${_pageSize}_${_currentSortColumn}_${_currentSortDirection}_${_currentFilterColumn}_$_currentFilterValue';
     final ValueKey<String> dbGridKey = ValueKey<String>(dynamicKeyString);
 
     final int totalPages = (_totalRecords / _pageSize).ceil();
 
-    return Scaffold(
-      body: Column(
-        children: [
-          getSelectionRow(), // Row with Ente and Struttura dropdowns
-          // Show loading indicator during initial setup or dropdown loading
-          if (showInitialLoading)
-            const Expanded(child: Center(child: CircularProgressIndicator()))
-          else
-            // The actual data grid widget.
-            Expanded(
-              child: DBGridWidget(
-                key: dbGridKey, // Pass the dynamic key to DBGridWidget
-                config: dbGridConfig,
-              ),
+    // Rimosso lo Scaffold e l'AppBar, restituisci direttamente la Column
+    return Column(
+      children: [
+        getSelectionRow(),
+        if (showInitialLoading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(
+            child: DBGridWidget(
+              key: dbGridKey,
+              config: dbGridConfig,
             ),
-          // NEW: Pagination row at the bottom
-          if (!showInitialLoading && _totalRecords > 0)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: _currentPage > 0 ? _goToPreviousPage : null,
-                  ),
-                  Text('Pag. ${_currentPage + 1}/$totalPages'),
-                  IconButton(
-                    icon: const Icon(Icons.arrow_forward),
-                    onPressed: _currentPage < totalPages - 1 ? _goToNextPage : null,
-                  ),
-                ],
-              ),
+          ),
+        if (!showInitialLoading && _totalRecords > 0)
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: _currentPage > 0 ? _goToPreviousPage : null,
+                ),
+                Text('Pag. ${_currentPage + 1}/$totalPages'),
+                IconButton(
+                  icon: const Icon(Icons.arrow_forward),
+                  onPressed: _currentPage < totalPages - 1 ? _goToNextPage : null,
+                ),
+              ],
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }

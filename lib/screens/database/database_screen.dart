@@ -3,11 +3,14 @@
 
 import 'dart:convert';
 import 'dart:typed_data'; // For Uint8List with file_saver
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:csv/csv.dart'; // For CSV generation
 import 'package:file_saver/file_saver.dart';
+import 'package:flutter/material.dart';
+import 'package:get/get.dart'; // Importa Get per UiController
+import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:una_social/controllers/ui_controller.dart'; // Importa UiController
+import 'package:una_social/helpers/logger_helper.dart'; // Per il logging
 import 'package:una_social/helpers/snackbar_helper.dart'; // Importa l'helper Snackbar
 
 // Enum for export formats
@@ -25,67 +28,34 @@ class DatabaseScreen extends StatefulWidget {
 
 class _DatabaseScreenState extends State<DatabaseScreen> {
   final supabase = Supabase.instance.client;
-  List<String> _tableNames = [];
-  bool _isLoadingTables = true;
-  String? _errorMessageForUI; // Messaggio di errore da mostrare nella UI
+  final UiController uiController = Get.find<UiController>(); // Ottieni l'istanza di UiController
 
   @override
   void initState() {
+    appLogger.info("DatabaseScreen: initState");
     super.initState();
-    _fetchTableNames(); // Non chiamare _fetchTableNamesAndShowSnackbar qui direttamente
-    // perché initState non dovrebbe contenere chiamate dirette a
-    // ScaffoldMessenger se il widget non è ancora completamente costruito
-    // e inserito nell'albero.
-    // Invece, _fetchTableNames chiamerà la snackbar DOPO che i dati sono stati caricati.
+    uiController.fetchTableNamesOnce();
   }
 
-  Future<void> _fetchTableNames() async {
-    if (!mounted) return;
-    setState(() {
-      _isLoadingTables = true;
-      _errorMessageForUI = null;
-    });
+  // Il metodo _refreshTableNames locale è stato modificato per forzare un ricaricamento.
+  Future<void> _refreshTableNames() async {
+    appLogger.info("DatabaseScreen: _refreshTableNames");
 
-    try {
-      final response = await supabase.rpc('get_public_tables');
-      if (!mounted) return;
-
-      if (response == null) {
-        throw Exception('Chiamata RPC per tabelle ha restituito null');
-      }
-
-      final List<dynamic> tableData = response as List<dynamic>;
-      final newTableNames = tableData.map((table) => table['table_name'].toString()).toList();
-
-      setState(() {
-        _tableNames = newTableNames;
-        _isLoadingTables = false;
-      });
-
-      // Mostra snackbar di successo DOPO l'aggiornamento dello stato
-      // e assicurandosi che il widget sia ancora montato
+    await uiController.fetchTableNamesOnce(force: true);
+    if (uiController.errorMessageForDBTables.isNotEmpty) {
       if (mounted) {
-        SnackbarHelper.showSuccessSnackbar(context, "Lette ${_tableNames.length} tabelle da Supabase");
+        SnackbarHelper.showErrorSnackbar(context, uiController.errorMessageForDBTables.value);
       }
-    } catch (e) {
-      final String errorMsg = "Errore in lettura tabelle: ${e.toString()}";
-      //print(errorMsg); // Logga l'errore completo
-      if (!mounted) return;
-
-      setState(() {
-        _errorMessageForUI = "Impossibile caricare le tabelle. Controlla la console per dettagli."; // Messaggio più generico per UI
-        _isLoadingTables = false;
-        _tableNames = [];
-      });
-
-      // Mostra snackbar di errore
+    } else {
       if (mounted) {
-        SnackbarHelper.showErrorSnackbar(context, errorMsg);
+        SnackbarHelper.showSuccessSnackbar(context, "Lette ${uiController.tableNames.length} tabelle da Supabase");
       }
     }
   }
 
   Future<void> _exportTable(String tableName, ExportFormat format) async {
+    appLogger.info("DatabaseScreen: _exportTable - table: $tableName, format: ${format.name}");
+
     if (!mounted) return;
     SnackbarHelper.showInfoSnackbar(context, 'Preparazione esportazione di "$tableName" come ${format.name.toUpperCase()}...');
 
@@ -171,13 +141,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
   }
 
   Widget buildCard(BuildContext context, String tableName) {
-    // Costruisce una Card per ogni tabella
-    // Puoi personalizzare ulteriormente l'aspetto della Card qui
-    // Ad esempio, aggiungendo un'icona o un'azione specifica per la tabella
-
-    // Se vuoi mostrare il numero di righe, puoi passarlo come parametro o calcolarlo in anticipo
-    // Per ora, usiamo una stringa fittizia per il conteggio delle righe
-    // final rowCount = _tableNames.length; // Supponiamo che ogni tabella abbia lo stesso numero di righe
+    appLogger.info("DatabaseScreen: buildCard for table: $tableName");
     return GestureDetector(
       child: Card(
         elevation: 2,
@@ -194,115 +158,124 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
             itemBuilder: (BuildContext context) => <PopupMenuEntry<ExportFormat>>[
               PopupMenuItem<ExportFormat>(
                 value: ExportFormat.csv,
-                child: Row(children: [const Icon(Icons.grid_on_sharp, size: 20), const SizedBox(width: 10), Text('CSV (${_tableNames.length} righe)')]),
+                child: Row(children: [const Icon(Icons.grid_on_sharp, size: 20), const SizedBox(width: 10), Text('CSV')]),
               ),
               PopupMenuItem<ExportFormat>(
                 value: ExportFormat.json,
-                child: Row(children: [const Icon(Icons.data_object_rounded, size: 20), const SizedBox(width: 10), Text('JSON (${_tableNames.length} righe)')]),
+                child: Row(children: [const Icon(Icons.data_object_rounded, size: 20), const SizedBox(width: 10), Text('JSON')]),
               ),
               PopupMenuItem<ExportFormat>(
                 value: ExportFormat.sql,
-                child: Row(children: [const Icon(Icons.code_rounded, size: 20), const SizedBox(width: 10), Text('SQL (INSERTs, ${_tableNames.length} righe)')]),
+                child: Row(children: [const Icon(Icons.code_outlined, size: 20), const SizedBox(width: 10), Text('SQL')]),
               ),
             ],
           ),
           onTap: () {
-            // Potresti aggiungere un'azione qui, tipo navigare a una vista dettagliata della tabella
-            //print("Selezionata tabella: $tableName");
             SnackbarHelper.showInfoSnackbar(context, "Un tap selezionata tabella: $tableName, doppio tap per aprire tabella e gestione. Usa il menu per esportare.");
           },
         ),
       ),
       onDoubleTap: () {
-        GoRouter.of(context).go('/app/$tableName');
+        GoRouter.of(context).go('/app/database/$tableName');
       },
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoadingTables) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    appLogger.info("DatabaseScreen: build");
+    return Obx(() {
+      // Avvolgi il widget in Obx per reagire ai cambiamenti del controller
+      final bool isLoading = uiController.isLoadingTables.value;
+      final String errorMessage = uiController.errorMessageForDBTables.value; // Corretto: non più nullable
+      final List<String> tableNames = uiController.tableNames; // Corretto: rimosso .value
 
-    if (_errorMessageForUI != null && _tableNames.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 48),
-              const SizedBox(height: 16),
-              Text(
-                'Errore Caricamento Tabelle',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.red),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _errorMessageForUI!, // Messaggio più generico per la UI
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Riprova'),
-                onPressed: _fetchTableNames,
-                style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Theme.of(context).colorScheme.onPrimary),
-              )
-            ],
+      if (isLoading && tableNames.isEmpty) {
+        // Mostra caricamento solo se non ci sono dati
+        return const Center(child: CircularProgressIndicator());
+      }
+
+      if (errorMessage.isNotEmpty && tableNames.isEmpty) {
+        // Corretto: errorMessage non è più nullable
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  'Errore Caricamento Tabelle',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.red),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  errorMessage, // Usa il messaggio di errore dal controller
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Riprova'),
+                  onPressed: _refreshTableNames, // Chiama il refresh che usa il controller
+                  style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Theme.of(context).colorScheme.onPrimary),
+                )
+              ],
+            ),
           ),
+        );
+      }
+
+      if (!isLoading && tableNames.isEmpty && errorMessage.isEmpty) {
+        // Corretto: errorMessage non è più nullable
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.info_outline, color: Colors.blueGrey, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  'Nessuna Tabella Trovata',
+                  style: Theme.of(context).textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Non ci sono tabelle nello schema "public" o non è stato possibile caricarle.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Ricarica'),
+                  onPressed: _refreshTableNames, // Chiama il refresh che usa il controller
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      // Corpo principale con la lista delle tabelle
+      return RefreshIndicator(
+        onRefresh: _refreshTableNames, // Aggiunge pull-to-refresh
+        child: ListView.separated(
+          padding: const EdgeInsets.all(8.0),
+          itemCount: tableNames.length,
+          itemBuilder: (context, index) {
+            final tableName = tableNames[index];
+            return buildCard(context, tableName);
+          },
+          separatorBuilder: (context, index) => const SizedBox(height: 0), // Nessun separatore visibile tra le Card
         ),
       );
-    }
-
-    if (!_isLoadingTables && _tableNames.isEmpty && _errorMessageForUI == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.info_outline, color: Colors.blueGrey, size: 48),
-              const SizedBox(height: 16),
-              Text(
-                'Nessuna Tabella Trovata',
-                style: Theme.of(context).textTheme.titleLarge,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Non ci sono tabelle nello schema "public" o non è stato possibile caricarle.',
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Ricarica'),
-                onPressed: _fetchTableNames,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // Corpo principale con la lista delle tabelle
-    return RefreshIndicator(
-      onRefresh: _fetchTableNames, // Aggiunge pull-to-refresh
-      child: ListView.separated(
-        padding: const EdgeInsets.all(8.0),
-        itemCount: _tableNames.length,
-        itemBuilder: (context, index) {
-          final tableName = _tableNames[index];
-          return buildCard(context, tableName);
-        },
-        separatorBuilder: (context, index) => const SizedBox(height: 0), // Nessun separatore visibile tra le Card
-      ),
-    );
+    });
   }
 }

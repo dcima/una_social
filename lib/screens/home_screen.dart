@@ -20,6 +20,7 @@ import 'package:una_social/models/personale.dart';
 import 'package:una_social/painters/star_painter.dart';
 import 'package:una_social/screens/esterni_profile.dart';
 import 'package:una_social/screens/personale_profile.dart';
+import 'package:una_social/app_router.dart'; // Importa AppRoute
 
 enum ProfileAction { edit, logout, version }
 
@@ -27,13 +28,11 @@ const Color primaryBlue = Color(0xFF0028FF);
 const Color primaryGold = Color(0xFFFFD700);
 
 class HomeScreen extends StatefulWidget {
-  final String screenName;
   final Widget child;
 
   const HomeScreen({
     super.key,
     required this.child,
-    this.screenName = 'Home',
   });
 
   @override
@@ -44,9 +43,13 @@ class _HomeScreenState extends State<HomeScreen> {
   final PersonaleController ctrlPersonale = Get.find<PersonaleController>();
   final EsterniController ctrlEsterni = Get.find<EsterniController>();
   final AuthController authController = Get.find<AuthController>();
+  final UiController uiController = Get.find<UiController>();
   String _appVersion = 'Caricamento...';
   String _buildNumber = '';
   bool _profileCheckCompleted = false;
+
+  // Variabile per prevenire il doppio tap/click sul drawer
+  bool _isNavigating = false;
 
   @override
   void initState() {
@@ -62,6 +65,32 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildNumber = info.buildNumber;
       });
     }
+  }
+
+  // Funzione per gestire i tap sulle voci del drawer con debouncing
+  void _handleDrawerTap(VoidCallback action) {
+    if (_isNavigating) {
+      // Se una navigazione è già in corso, ignora il tap
+      return;
+    }
+
+    setState(() {
+      _isNavigating = true; // Imposta lo stato di navigazione a true
+    });
+
+    action(); // Esegui l'azione di navigazione e chiusura del drawer
+
+    // Resetta lo stato di navigazione dopo un breve ritardo.
+    // Questo permette alla navigazione di iniziare e al drawer di chiudersi,
+    // ignorando tap multipli nel frattempo.
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        // Assicurati che il widget sia ancora montato prima di chiamare setState
+        setState(() {
+          _isNavigating = false; // Reimposta lo stato a false
+        });
+      }
+    });
   }
 
   void _showSnackbar(String message, {bool isError = false}) {
@@ -179,9 +208,15 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Widget> getSistema(BuildContext context, AuthController authController) {
     return [
       ListTile(
-        leading: const Icon(Icons.data_object_outlined),
+        leading: const Icon(Icons.storage_outlined),
         title: const Text('Database'),
-        onTap: () => GoRouter.of(context).go('/app/database'),
+        onTap: () {
+          _handleDrawerTap(() {
+            // Usa il wrapper _handleDrawerTap
+            GoRouter.of(context).go(AppRoute.database.path);
+            Navigator.of(context).pop();
+          });
+        },
       ),
     ];
   }
@@ -216,13 +251,36 @@ class _HomeScreenState extends State<HomeScreen> {
                         ListTile(
                           leading: const Icon(Icons.home_outlined),
                           title: const Text('Home'),
-                          onTap: () => GoRouter.of(context).go('/app/home'),
+                          onTap: () {
+                            _handleDrawerTap(() {
+                              // Usa il wrapper _handleDrawerTap
+                              GoRouter.of(context).go(AppRoute.home.path);
+                              Navigator.of(context).pop();
+                            });
+                          },
                         ),
                         if (authController.isSuperAdmin.value == true) ...getSistema(context, authController),
                         ListTile(
                           leading: const Icon(Icons.chat),
                           title: const Text('Chat'),
-                          onTap: () => GoRouter.of(context).go('/app/chat'),
+                          onTap: () {
+                            _handleDrawerTap(() {
+                              // Usa il wrapper _handleDrawerTap
+                              GoRouter.of(context).go(AppRoute.chat.path);
+                              Navigator.of(context).pop();
+                            });
+                          },
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.person_add_alt_1_outlined),
+                          title: const Text('Importa Contatti'),
+                          onTap: () {
+                            _handleDrawerTap(() {
+                              // Usa il wrapper _handleDrawerTap
+                              GoRouter.of(context).go(AppRoute.importContacts.path);
+                              Navigator.of(context).pop();
+                            });
+                          },
                         ),
                       ],
                     )),
@@ -234,16 +292,72 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildBreadcrumbsWidget(BuildContext context) {
+    return Obx(() {
+      final breadcrumbs = uiController.breadcrumbs;
+      if (breadcrumbs.isEmpty) {
+        return Text(
+          uiController.currentScreenName.value,
+          style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
+          overflow: TextOverflow.ellipsis,
+        );
+      }
+
+      return SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: breadcrumbs.map<Widget>((item) {
+            final isLast = item == breadcrumbs.last;
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    if (!isLast) {
+                      GoRouter.of(context).go(item.path);
+                    }
+                  },
+                  child: Row(
+                    children: [
+                      if (item.icon != null)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4.0),
+                          child: Icon(item.icon, size: 16, color: isLast ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant),
+                        ),
+                      Text(
+                        item.title,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
+                          color: isLast ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isLast)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                    child: Icon(Icons.chevron_right, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+              ],
+            );
+          }).toList(),
+        ),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 600;
     final currentDbGridControl = _getDbGridControl();
     final canShowDbGridControls = currentDbGridControl != null;
-    final UiController uiController = Get.find<UiController>();
 
-    // Make only the title reactive, not the entire Scaffold body.
-    final String currentScreenTitle = uiController.currentScreenName.value;
     final currentGridConfig = (widget.child is DBGridProvider) ? (widget.child as DBGridProvider).dbGridConfig : null;
     final canToggleView = canShowDbGridControls && (currentGridConfig?.uiModes.length ?? 0) > 1;
 
@@ -264,15 +378,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 8),
                     const Text('Una Social', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(width: 12),
-                    // Display the current screen name, which is now reactive via Obx below.
-                    Expanded(child: Text(currentScreenTitle, style: const TextStyle(fontSize: 20, color: Colors.red, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                    Expanded(child: _buildBreadcrumbsWidget(context)),
                     if (canShowDbGridControls) ...[
                       IconButton(tooltip: "Ricarica Dati", icon: const Icon(Icons.refresh), onPressed: currentDbGridControl.refreshData),
                       if (canToggleView) IconButton(tooltip: "Cambia vista", icon: const Icon(Icons.view_quilt_outlined), onPressed: _handleToggleView),
                     ],
                     const SizedBox(width: 10),
                     Obx(() {
-                      // Keep Obx for parts that depend on observables
                       final authUser = Supabase.instance.client.auth.currentUser;
                       if (authUser == null) return Padding(padding: const EdgeInsets.all(8.0), child: _buildAvatar(null));
 
@@ -342,8 +454,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            // The child widget (e.g., ColleghiScreen) should not cause re-entrancy.
-            // If it does, further investigation into ColleghiScreen's build method is needed.
             Expanded(child: widget.child),
           ],
         ),

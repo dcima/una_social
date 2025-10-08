@@ -2,19 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 import 'package:una_social/helpers/db_grid.dart';
 
-class AmbitiScreen extends StatelessWidget {
-  AmbitiScreen({super.key});
+class Ambiti extends StatefulWidget {
+  const Ambiti({super.key}); // Aggiungi const e correggi il costruttore
+
+  @override
+  State<Ambiti> createState() => _AmbitiState();
+}
+
+class _AmbitiState extends State<Ambiti> {
+  // Rimosso l'istanza di UiController da qui, non è più necessaria per initState.
+  // Se fosse necessaria per altri scopi nel build, andrebbe mantenuta.
 
   final List<GridColumn> columns = [
-    GridColumn(
-      columnName: 'id_ambito',
-      columnWidthMode: ColumnWidthMode.fitByCellValue,
-      label: const Text('ID Ambito'),
-    ),
     GridColumn(
       columnWidthMode: ColumnWidthMode.fill,
       columnName: 'universita',
       label: const Text('Università'),
+    ),
+    GridColumn(
+      columnName: 'id_ambito',
+      columnWidthMode: ColumnWidthMode.fitByCellValue,
+      label: const Text('ID Ambito'),
     ),
     GridColumn(
       columnName: 'nome_ambito',
@@ -22,6 +30,11 @@ class AmbitiScreen extends StatelessWidget {
       label: const Text('Nome Ambito'),
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,9 +54,6 @@ class AmbitiScreen extends StatelessWidget {
       uiModes: const [UIMode.grid, UIMode.form],
     );
 
-    return Scaffold(
-      //appBar: AppBar(title: const Text('Ambiti')),
-      body: DBGridWidget(config: dbGridConfig),
-    );
+    return DBGridWidget(config: dbGridConfig);
   }
 }
