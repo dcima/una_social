@@ -6,11 +6,10 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
-import 'package:una_social/helpers/db_grid_form_view.dart'; // Make sure this path is correct
+import 'package:una_social/helpers/db_grid_form_view.dart';
 import 'package:una_social/helpers/logger_helper.dart';
-import 'package:universal_html/html.dart' as html; // Import per parsing HTML
+import 'package:universal_html/html.dart' as html;
 
-// --------------- ENUMS E CLASSI DI CONFIGURAZIONE ---------------
 enum SortDirection { asc, desc }
 
 enum UIMode { grid, form, map }
@@ -38,7 +37,10 @@ class DBGridConfig {
   final String? formHookName;
   final String? mapHookName;
   final String? rpcFunctionName;
-  final Function(int totalRecords)? onTotalRecordsChanged; // Callback for total records
+  final Function(int totalRecords)? onTotalRecordsChanged;
+  final Function()? onLoadMoreRequested;
+  final Function()? onPageChanged;
+  final int currentPage;
 
   DBGridConfig({
     required this.dataSourceTable,
@@ -58,40 +60,36 @@ class DBGridConfig {
     this.showHeader = true,
     this.uiModes = const [UIMode.grid],
     this.onTotalRecordsChanged,
+    this.onLoadMoreRequested,
+    this.onPageChanged,
+    this.currentPage = 0,
   }) : assert(pageLength > 0, 'pageLength must be greater than 0');
 }
 
-// --------------- INTERFACE FOR SCREENS PROVIDING DBGRID ACCESS ---------------
 abstract class DBGridProvider {
   DBGridConfig get dbGridConfig;
   GlobalKey<State<DBGridWidget>> get dbGridWidgetKey;
 }
 
-// --------------- INTERFACCIA PUBBLICA DI CONTROLLO ---------------
 abstract class DBGridControl {
   void toggleUIModePublic();
   UIMode get currentDisplayUIMode;
   void refreshData();
-  // Form navigation methods
   bool canGoToPreviousRecordInForm();
   bool canGoToNextRecordInForm();
   void goToPreviousRecordInForm();
   void goToNextRecordInForm();
   Map<String, dynamic>? getCurrentRecordForForm();
   List<String> getPrimaryKeyColumns();
-
-  // NEW: Expose current record index and total records for form view
   int get currentFormRecordIndex;
   int get totalFormRecords;
 }
 
-// --------------- WIDGET BASE ASTRATTO ---------------
 abstract class DBGridAbstractWidget extends StatefulWidget {
   final DBGridConfig config;
   const DBGridAbstractWidget({super.key, required this.config});
 }
 
-// --------------- WIDGET CONCRETO DBGRIDWIDGET ---------------
 class DBGridWidget extends DBGridAbstractWidget {
   const DBGridWidget({super.key, required super.config});
 
@@ -106,7 +104,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   bool _isLoading = true;
   String _errorMessage = '';
 
-  int _currentPage = 0; // Managed internally, ColleghiScreen's _currentPage is for RPC offset
   int _totalRecords = 0;
 
   DataGridController _dataGridController = DataGridController();
@@ -114,10 +111,12 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   late UIMode _currentUIMode;
   int _currentFormRecordIndex = -1;
 
-  // Filtering state - Stores actual filter values and their controllers
   final Map<String, String> _filterValues = {};
   final Map<String, TextEditingController> _filterControllers = {};
-  Timer? _filterDebounce; // For filter debouncing
+  Timer? _filterDebounce;
+
+  int _loadMoreOffset = 0;
+  int _currentOffset = 0;
 
   @override
   void initState() {
@@ -125,10 +124,12 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     _currentUIMode = widget.config.uiModes.isNotEmpty ? widget.config.uiModes.first : UIMode.grid;
     _initializeSortedColumns();
 
-    final List<String> initialFilterableColumns = ['photo_url', 'cognome', 'nome', 'email_principale'];
-    for (var colName in initialFilterableColumns) {
-      _filterControllers[colName] = TextEditingController();
-      _filterValues[colName] = '';
+    final List<String> filterableColumns = widget.config.columns.map((c) => c.columnName).toList();
+    for (var colName in filterableColumns) {
+      if (!widget.config.excludeColumns.contains(colName)) {
+        _filterControllers[colName] = TextEditingController();
+        _filterValues[colName] = '';
+      }
     }
 
     _dataSource = _DBGridDataSource(
@@ -148,12 +149,14 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
             _sortedColumnsState[sortCol.name] = sortCol.sortDirection;
           }
         });
-        _fetchData(isRefresh: true); // Trigger full refresh on sort change
+        _fetchData(isRefresh: true);
       },
       fetchDataCallback: (isRefresh) => _fetchData(isRefresh: isRefresh),
+      onLoadMoreRequested: widget.config.onLoadMoreRequested,
+      currentPage: widget.config.currentPage,
     );
 
-    _fetchData(isRefresh: true); // Initial data fetch
+    _fetchData(isRefresh: true);
   }
 
   @override
@@ -165,63 +168,51 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
       oldWidget.config.rpcFunctionParams,
     );
     final bool rpcFunctionNameChanged = widget.config.rpcFunctionName != oldWidget.config.rpcFunctionName;
-    // Puoi aggiungere altre comparazioni profonde se altri campi della config dovessero scatenare un refetch
-    // Ad esempio, per le colonne, anche se la key del widget dovrebbe già gestirlo per i cambiamenti strutturali
-    // final bool columnsDefinitionChanged = !DeepCollectionEquality().equals(
-    //   widget.config.columns.map((c) => c.columnName).toList(),
-    //   oldWidget.config.columns.map((c) => c.columnName).toList(),
-    // );
+    final bool dataSourceTableChanged = widget.config.dataSourceTable != oldWidget.config.dataSourceTable;
+    final bool currentPageChanged = widget.config.currentPage != oldWidget.config.currentPage;
+    final int newOffset = widget.config.rpcFunctionParams?['p_offset'] as int? ?? 0;
 
-    if (rpcFunctionParamsChanged || rpcFunctionNameChanged /* || columnsDefinitionChanged */) {
-      appLogger.info("DBGridWidget: rpcFunctionParams or rpcFunctionName changed. Refetching data.");
+    if (rpcFunctionParamsChanged || rpcFunctionNameChanged || dataSourceTableChanged) {
+      appLogger.info("DBGridWidget: rpcFunctionParams, rpcFunctionName or dataSourceTable changed. Refetching data.");
+      _currentOffset = newOffset;
+      _fetchData(isRefresh: true);
+    } else if (currentPageChanged) {
+      _loadMoreOffset = 0;
+      _currentOffset = newOffset;
+      appLogger.info("DBGridWidget: currentPage changed. Resetting loadMoreOffset and refetching data.");
       _fetchData(isRefresh: true);
     }
   }
 
   @override
   void dispose() {
-    _filterDebounce?.cancel(); // Cancel debounce timer on dispose
-    _filterControllers.forEach((key, controller) => controller.dispose()); // Dispose all controllers
+    _filterDebounce?.cancel();
+    _filterControllers.forEach((key, controller) => controller.dispose());
     super.dispose();
   }
 
-  // FUNZIONE AGGIORNATA: Genera un URL proxy per l'immagine per aggirare i problemi CORS
   String getProxiedImageUrl(String originalPhotoUrl) {
-    // Utilizziamo Supabase.instance.client.rest.url per ottenere un URL che contiene il project-ref
-    // Sarà qualcosa come 'http://<IP_O_DOMINIO_DEL_TUO_SERVER>:8000/rest/v1'
     final restBaseUrl = Supabase.instance.client.rest.url;
 
-    // Controlla se l'URL è nullo o vuoto prima di tentare di analizzarlo
     if (restBaseUrl.isEmpty) {
       appLogger.error('Supabase REST URL is null or empty, cannot generate proxied image URL. Falling back to original.');
-      return originalPhotoUrl; // Fallback to original if base URL not available
+      return originalPhotoUrl;
     }
 
     final uri = Uri.parse(restBaseUrl);
-    final host = uri.host; // e.g., '192.168.1.100' or 'localhost'
-    final port = uri.port; // e.g., '8000'
+    final host = uri.host;
+    final port = uri.port;
 
-    // Per un setup Docker, il "projectRef" è l'host:porta
     final projectRef = '$host:$port';
 
-    // Aggiungi logging qui per verificare i valori estratti
-    appLogger.info('DEBUG: REST Base URL: $restBaseUrl');
-    appLogger.info('DEBUG: Host from URL: $host');
-    appLogger.info('DEBUG: Port from URL: $port');
-    appLogger.info('DEBUG: Project Ref extracted (for Docker): $projectRef');
-
-    // Costruiamo l'URL completo della nostra Edge Function 'image-proxy'
-    // Nota: per le Edge Functions su Docker, l'URL è tipicamente <host>:<port>/functions/v1/<nome_funzione>
     final proxyBaseUrl = 'https://$projectRef/functions/v1/image-proxy';
 
-    // Codifica l'URL originale dell'immagine e lo aggiunge come parametro alla Edge Function
     final fullProxiedUrl = '$proxyBaseUrl?url=${Uri.encodeComponent(originalPhotoUrl)}';
     appLogger.info('DEBUG: Generated Proxied URL: $fullProxiedUrl');
 
     return fullProxiedUrl;
   }
 
-  // Centralized map comparison logic
   bool _areMapsEqual(Map<String, dynamic> map1, Map<String, dynamic> map2) {
     if (widget.config.primaryKeyColumns.isNotEmpty) {
       bool allPkMatch = true;
@@ -246,18 +237,22 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   Future<void> _fetchData({bool isRefresh = false}) async {
     if (!mounted) return;
 
+    final int limit = widget.config.rpcFunctionParams?['p_limit'] as int? ?? widget.config.pageLength;
+    final int baseOffset = widget.config.rpcFunctionParams?['p_offset'] as int? ?? 0;
+
     if (isRefresh) {
-      _currentPage = 0; // Reset internal page counter for full refresh
       _data.clear();
       _dataSource.clearSelections();
       _currentFormRecordIndex = -1;
-    } else {
-      _currentPage++; // Increment internal page counter for load more
+      _loadMoreOffset = 0;
+      _currentOffset = baseOffset;
+      appLogger.info("DBGridWidget: Full refresh. Clearing data. baseOffset: $baseOffset");
     }
 
-    // Skip fetching if all records are already loaded (only for client-side pagination)
-    if (_data.isNotEmpty && _data.length >= _totalRecords && !isRefresh && _totalRecords > 0) {
-      appLogger.info("All records already loaded. Not fetching more.");
+    final int actualOffset = baseOffset + _loadMoreOffset;
+
+    if (!isRefresh && _data.isNotEmpty && actualOffset + limit > _totalRecords && _totalRecords > 0) {
+      appLogger.info("All records for current loadMore context already loaded. Not fetching more.");
       setState(() => _isLoading = false);
       return;
     }
@@ -268,70 +263,85 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     });
 
     try {
-      // Use p_limit and p_offset directly from widget.config.rpcFunctionParams
-      // as ColleghiScreen is now managing the currentPage for RPC calls.
-      final int limit = widget.config.rpcFunctionParams?['p_limit'] as int? ?? widget.config.pageLength;
-      final int offset = widget.config.rpcFunctionParams?['p_offset'] as int? ?? (_currentPage * limit); // Fallback to internal if not provided by RPC params
-
       dynamic rpcResult;
+      final Map<String, dynamic> rpcParams = Map.from(widget.config.rpcFunctionParams ?? {});
+
+      rpcParams['p_offset'] = actualOffset;
+
+      final sortedColumn = _sortedColumnsState.entries.firstOrNull;
+      if (sortedColumn != null) {
+        rpcParams['p_order_by'] = sortedColumn.key;
+        rpcParams['p_order_direction'] = sortedColumn.value == DataGridSortDirection.ascending ? 'asc' : 'desc';
+      } else {
+        rpcParams.putIfAbsent('p_order_by', () => widget.config.initialSortBy.isNotEmpty ? widget.config.initialSortBy.first.column : null);
+        rpcParams.putIfAbsent('p_order_direction', () => widget.config.initialSortBy.isNotEmpty && widget.config.initialSortBy.first.direction == SortDirection.desc ? 'desc' : 'asc');
+      }
+
+      final activeFilter = _filterValues.entries.firstWhereOrNull((e) => e.value.isNotEmpty);
+      if (activeFilter != null) {
+        rpcParams['p_filter_column'] = activeFilter.key;
+        rpcParams['p_filter_value'] = activeFilter.value;
+      } else {
+        rpcParams.putIfAbsent('p_filter_column', () => null);
+        rpcParams.putIfAbsent('p_filter_value', () => null);
+      }
+
+      appLogger.info('RPC final params for fetch: $rpcParams');
 
       if (widget.config.rpcFunctionName != null) {
-        final Map<String, dynamic> rpcParams = Map.from(widget.config.rpcFunctionParams ?? {});
-
-        // If p_limit and p_offset are *not* already in rpcFunctionParams, add them based on internal state
-        // However, ColleghiScreen *is* passing them now, so this might be redundant, but safe.
-        rpcParams.putIfAbsent('p_limit', () => limit);
-        rpcParams.putIfAbsent('p_offset', () => offset);
-
-        // Ensure sorting parameters are present
-        final sortedColumn = _sortedColumnsState.entries.firstOrNull;
-        if (sortedColumn != null) {
-          rpcParams['p_order_by'] = sortedColumn.key;
-          rpcParams['p_order_direction'] = sortedColumn.value == DataGridSortDirection.ascending ? 'asc' : 'desc';
-        } else {
-          rpcParams.putIfAbsent('p_order_by', () => widget.config.initialSortBy.isNotEmpty ? widget.config.initialSortBy.first.column : 'cognome');
-          rpcParams.putIfAbsent('p_order_direction', () => widget.config.initialSortBy.isNotEmpty && widget.config.initialSortBy.first.direction == SortDirection.desc ? 'desc' : 'asc');
-        }
-
-        // Ensure filter parameters are present
-        final activeFilter = _filterValues.entries.firstWhereOrNull((e) => e.value.isNotEmpty);
-        if (activeFilter != null) {
-          rpcParams['p_filter_column'] = activeFilter.key;
-          rpcParams['p_filter_value'] = activeFilter.value;
-        } else {
-          rpcParams.putIfAbsent('p_filter_column', () => null);
-          rpcParams.putIfAbsent('p_filter_value', () => null);
-        }
-
-        appLogger.info('RPC final params: $rpcParams');
-
         rpcResult = await Supabase.instance.client.rpc(
           widget.config.rpcFunctionName!,
           params: rpcParams,
         );
 
         if (rpcResult is Map<String, dynamic> && rpcResult.containsKey('data') && rpcResult.containsKey('count')) {
-          _data.addAll(List<Map<String, dynamic>>.from(rpcResult['data'] ?? []));
+          final List<Map<String, dynamic>> newRecords = List<Map<String, dynamic>>.from(rpcResult['data'] ?? []);
+
+          if (isRefresh) {
+            _data = newRecords;
+          } else {
+            _data.addAll(newRecords);
+          }
+
           _totalRecords = (rpcResult['count'] as num?)?.toInt() ?? 0;
+
+          _loadMoreOffset = _data.length;
         } else if (rpcResult is List) {
-          _data.addAll(List<Map<String, dynamic>>.from(rpcResult));
-          _totalRecords = _data.length; // Assuming all data returned if not JSONB format
-          appLogger.warning('RPC did not return expected JSONB with data and count. Assuming all data returned.');
-        } else if (rpcResult != null) {
-          _data.add(Map<String, dynamic>.from(rpcResult));
-          _totalRecords = 1;
-        } else {
+          final List<Map<String, dynamic>> newRecords = List<Map<String, dynamic>>.from(rpcResult);
+          if (isRefresh) {
+            _data = newRecords;
+          } else {
+            _data.addAll(newRecords);
+          }
           _totalRecords = _data.length;
+          appLogger.warning('RPC did not return expected JSONB with data and count. Assuming all data returned for current range.');
+          _loadMoreOffset = _data.length;
+        } else {
+          if (rpcResult != null) {
+            if (isRefresh) {
+              _data = [Map<String, dynamic>.from(rpcResult)];
+            } else {
+              _data.add(Map<String, dynamic>.from(rpcResult));
+            }
+            _totalRecords = _data.length;
+          } else {
+            if (isRefresh) _data.clear();
+            _totalRecords = 0;
+          }
+          _loadMoreOffset = _data.length;
         }
       } else {
-        // Fallback for non-RPC data source
-        final PostgrestResponse<dynamic> response = await Supabase.instance.client.from(widget.config.dataSourceTable).select().range(offset, offset + limit - 1).count(CountOption.exact);
+        final PostgrestResponse<List<Map<String, dynamic>>> response = await Supabase.instance.client.from(widget.config.dataSourceTable).select().range(actualOffset, actualOffset + limit - 1).count(CountOption.exact);
 
-        _data.addAll(List<Map<String, dynamic>>.from(response.data ?? []));
+        if (isRefresh) {
+          _data = List<Map<String, dynamic>>.from(response.data);
+        } else {
+          _data.addAll(List<Map<String, dynamic>>.from(response.data));
+        }
         _totalRecords = response.count;
+        _loadMoreOffset = _data.length;
       }
 
-      // Call the callback to update total records in parent
       widget.config.onTotalRecordsChanged?.call(_totalRecords);
 
       if (!mounted) return;
@@ -340,37 +350,20 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         appLogger.info("DBGridWidget: Keys of first fetched record: ${_data.first.keys.toList()}");
       }
 
-      final int startIndexForDecoding = isRefresh ? 0 : _data.length - (rpcResult is Map && rpcResult.containsKey('data') ? ((rpcResult['data']?.length ?? 0) as num).toInt() : (rpcResult is List ? rpcResult.length.toInt() : 0));
-      for (int i = startIndexForDecoding; i < _data.length; i++) {
-        final Map<String, dynamic> row = _data[i];
-        final Map<String, dynamic> newRow = Map.from(row);
-/**
-        List<dynamic>? decodeJsonbList(dynamic value, String fieldName) {
-          if (value is String) {
-            try {
-              final decoded = jsonDecode(value);
-              if (decoded is List) {
-                return List<dynamic>.from(decoded);
-              }
-            } catch (e) {
-              appLogger.error('Error decoding $fieldName string in DBGridWidget: $e');
-            }
-          } else if (value is List) {
-            return List<dynamic>.from(value);
-          }
-          return null;
+      // *** MODIFICA QUI PER IL SNACKBAR IN CASO DI ZERO RISULTATI ***
+      if (_data.isEmpty && _totalRecords == 0) {
+        // Rimosso check _errorMessage.isEmpty
+        String filterSummary = _buildFilterSummaryMessage();
+        if (filterSummary.isNotEmpty) {
+          _errorMessage = "Nessun risultato trovato. Filtri attivi: $filterSummary";
+        } else {
+          _errorMessage = widget.config.emptyDataMessage;
         }
-**/
-        _data[i] = newRow;
-      }
-
-      if (_data.isEmpty && _totalRecords == 0 && _errorMessage.isEmpty) {
-        _errorMessage = widget.config.emptyDataMessage;
         if (isRefresh) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(widget.config.emptyDataMessage)),
+                SnackBar(content: Text(_errorMessage)),
               );
             }
           });
@@ -393,7 +386,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         _columns = [];
       }
 
-      _dataSource.updateDataGridSource(_data);
+      _dataSource.updateDataGridSource(_data, isRefresh);
 
       if (_currentUIMode == UIMode.form && _data.isNotEmpty) {
         final Map<String, dynamic>? previouslySelected = _dataSource.getSelectedDataForForm();
@@ -426,7 +419,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         _currentFormRecordIndex = -1;
         if (isRefresh || _columns.isEmpty) _columns.clear();
 
-        // Call the callback even on error to reset total records
         widget.config.onTotalRecordsChanged?.call(_totalRecords);
       }
     } finally {
@@ -434,16 +426,41 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
+  // *** NUOVO METODO PER COSTRUIRE IL RIEPILOGO DEI FILTRI ***
+  String _buildFilterSummaryMessage() {
+    List<String> activeFilters = [];
+
+    // Filtri globali (Ente, Struttura) da rpcFunctionParams
+    final rpcParams = widget.config.rpcFunctionParams;
+    if (rpcParams != null) {
+      if (rpcParams['p_ente'] is String && rpcParams['p_ente'] != 'Tutti gli enti') {
+        activeFilters.add("Ente: ''${rpcParams['p_ente']}''");
+      }
+      if (rpcParams.containsKey('p_struttura_display_name') && rpcParams['p_struttura_display_name'] is String && rpcParams['p_struttura_display_name'] != 'Tutte le strutture') {
+        activeFilters.add("Struttura: ''${rpcParams['p_struttura_display_name']}''");
+      }
+    }
+
+    // Filtri specifici per colonna gestiti dal DBGridWidget
+    _filterValues.forEach((columnName, filterValue) {
+      if (filterValue.isNotEmpty) {
+        String displayColumnName = _formatHeader(columnName);
+        activeFilters.add("$displayColumnName: ''$filterValue''");
+      }
+    });
+
+    if (activeFilters.isEmpty) {
+      return "";
+    }
+    return activeFilters.join(", ");
+  }
+
   Future<void> handleLoadMoreRows() async {
-    // This is for internal SfDataGrid "load more" button, if used.
-    // Given the external pagination, this might not be strictly needed or could be adapted.
-    // For now, it will simply re-call fetchData which uses the current external page logic.
-    if (_data.length < _totalRecords && !_isLoading) {
-      appLogger.info("SfDataGrid onLoadMoreRows triggered. Current data length: ${_data.length}, Total records: $_totalRecords");
-      // Trigger a fetch that respects the external pagination logic from ColleghiScreen
-      _fetchData(isRefresh: false);
+    if (widget.config.onLoadMoreRequested != null && _data.length < _totalRecords && !_isLoading) {
+      appLogger.info("SfDataGrid onLoadMoreRows triggered. Requesting more data from parent by calling onLoadMoreRequested.");
+      widget.config.onLoadMoreRequested!();
     } else {
-      appLogger.info("SfDataGrid onLoadMoreRows skipped. All data loaded or currently loading.");
+      appLogger.info("SfDataGrid onLoadMoreRows skipped. All data loaded, currently loading, or no callback provided.");
     }
   }
 
@@ -457,8 +474,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   List<GridColumn> _generateColumns(List<String> availableColumnNames) {
     List<GridColumn> cols = [];
     Set<String> addedColumns = {};
-
-    // final Map<String, GridColumn> userDefinedColumns = {for (var col in widget.config.columns) col.columnName: col};
 
     if (widget.config.selectable) {
       cols.add(GridColumn(
@@ -591,7 +606,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
         continue;
       }
 
-      final dynamic value = rowData[columnName];
+      dynamic value = rowData[columnName];
 
       if (columnName == 'photo_url') {
         String? photoUrl = value?.toString();
@@ -635,8 +650,23 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           imageWidget = const Icon(Icons.person, size: 40);
         }
         cells.add(DataGridCell<Widget>(columnName: columnName, value: imageWidget));
-      } else if (value is List) {
-        if (columnName == 'telefoni') {
+      }
+      // *** MODIFICA QUI PER LA FORMATTAZIONE DEI RUOLI ***
+      else if (columnName == 'ruoli') {
+        // Se l'RPC restituisce già una stringa formattata, usala direttamente
+        if (value is String) {
+          cells.add(DataGridCell<String>(columnName: columnName, value: value));
+        } else if (value is List) {
+          // Fallback se l'RPC restituisce ancora una lista
+          List<String> ruoliList = value.map((e) => e.toString()).toList();
+          cells.add(DataGridCell<String>(columnName: columnName, value: ruoliList.join(', ')));
+        } else {
+          cells.add(DataGridCell<String>(columnName: columnName, value: value?.toString() ?? ''));
+        }
+      }
+      // Fine modifica ruoli
+      else if (value is List) {
+        if (columnName == 'telefoni' || columnName == 'altre_emails') {
           cells.add(DataGridCell<String>(columnName: columnName, value: (value).map((e) => e['v']?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
         } else {
           cells.add(DataGridCell<String>(columnName: columnName, value: (value).map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).join(', ')));
@@ -755,12 +785,11 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     }
   }
 
-  // NEW: Implementation for DBGridControl getters
   @override
   int get currentFormRecordIndex => _currentFormRecordIndex;
 
   @override
-  int get totalFormRecords => _data.length; // Or _totalRecords if you want the full count, not just loaded data
+  int get totalFormRecords => _data.length;
 
   @override
   Widget build(BuildContext context) {
@@ -770,8 +799,10 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
     if (_errorMessage.isNotEmpty && _data.isEmpty) {
       return Center(child: Text(_errorMessage, style: const TextStyle(color: Colors.red)));
     }
-    if (!_isLoading && _data.isEmpty && _errorMessage.isEmpty) {
-      return Center(child: Text(widget.config.emptyDataMessage));
+    // Rimosso il check `_errorMessage.isEmpty` qui, perché _errorMessage può essere settato
+    // per messaggi informativi, non solo errori. La condizione cruciale è `_data.isEmpty`.
+    if (!_isLoading && _data.isEmpty) {
+      return Center(child: Text(_errorMessage.isNotEmpty ? _errorMessage : widget.config.emptyDataMessage));
     }
 
     switch (_currentUIMode) {
@@ -851,6 +882,11 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   }
 
   Widget _buildGridView() {
+    final String dynamicGridKey = '${widget.config.dataSourceTable}_${widget.config.rpcFunctionName}_'
+        '${widget.config.rpcFunctionParams?['p_limit']}_${widget.config.rpcFunctionParams?['p_offset']}_'
+        '${_sortedColumnsState.isNotEmpty ? _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') : ''}_'
+        '${_filterValues.isNotEmpty ? _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_') : ''}';
+
     return Column(children: [
       if (widget.config.uiModes.length > 1)
         Padding(
@@ -893,9 +929,7 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
           gridLinesVisibility: GridLinesVisibility.both,
           headerGridLinesVisibility: GridLinesVisibility.both,
           headerRowHeight: 70.0,
-          key: ValueKey(widget.config.dataSourceTable +
-              (_sortedColumnsState.isNotEmpty ? _sortedColumnsState.entries.map((e) => '${e.key}_${e.value?.toString()}').join('_') : '') +
-              (_filterValues.isNotEmpty ? _filterValues.entries.map((e) => '${e.key}_${e.value}').join('_') : '')), // Updated key generation
+          key: ValueKey(dynamicGridKey),
           loadMoreViewBuilder: (BuildContext context, LoadMoreRows loadMoreRows) => getMoreRows(context, loadMoreRows),
           navigationMode: GridNavigationMode.cell,
           onCellDoubleTap: _handleRowDoubleTap,
@@ -916,7 +950,6 @@ class _DBGridWidgetState extends State<DBGridWidget> implements DBGridControl {
   }
 }
 
-// --------------- DATASOURCE PER SfDataGrid ---------------
 class _DBGridDataSource extends DataGridSource {
   List<Map<String, dynamic>> _gridDataInternal = [];
   final DataGridRow Function(Map<String, dynamic>, int) _buildRowCallback;
@@ -926,6 +959,8 @@ class _DBGridDataSource extends DataGridSource {
   final bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) _areMapsEqualCallback;
   final Function(List<SortColumnDetails> sortColumns) _onSortRequest;
   final Function(bool isRefresh)? fetchDataCallback;
+  final Function()? onLoadMoreRequested;
+  int _currentPage;
 
   _DBGridDataSource({
     required List<Map<String, dynamic>> gridData,
@@ -935,12 +970,15 @@ class _DBGridDataSource extends DataGridSource {
     required bool Function(Map<String, dynamic> map1, Map<String, dynamic> map2) areMapsEqualCallback,
     required Function(List<SortColumnDetails> sortColumns) onSortRequest,
     this.fetchDataCallback,
+    this.onLoadMoreRequested,
+    required int currentPage,
   })  : _gridDataInternal = gridData,
         _buildRowCallback = buildRowCallback,
         _selectedRowsDataMap = selectedRowsDataMap,
         _onSelectionChanged = onSelectionChanged,
         _areMapsEqualCallback = areMapsEqualCallback,
-        _onSortRequest = onSortRequest {
+        _onSortRequest = onSortRequest,
+        _currentPage = currentPage {
     _buildDataGridRows();
   }
 
@@ -1014,10 +1052,15 @@ class _DBGridDataSource extends DataGridSource {
         }).toList());
   }
 
-  void updateDataGridSource(List<Map<String, dynamic>> newData) {
-    appLogger.info("_DBGridDataSource: updateDataGridSource => ${newData.length} new records.");
+  void updateDataGridSource(List<Map<String, dynamic>> newData, bool isRefresh) {
+    appLogger.info("_DBGridDataSource: updateDataGridSource => ${newData.length} new records. isRefresh: $isRefresh");
 
-    _gridDataInternal = newData;
+    if (isRefresh) {
+      _gridDataInternal = newData;
+    } else {
+      _gridDataInternal.addAll(newData);
+    }
+
     _buildDataGridRows();
     _selectedRowsDataMap.removeWhere((selectedItem) => !_gridDataInternal.any((newItem) => _areMapsEqualCallback(selectedItem, newItem)));
     notifyListeners();
@@ -1069,9 +1112,9 @@ class _DBGridDataSource extends DataGridSource {
 
   @override
   Future<void> handleLoadMoreRows() async {
-    appLogger.info("_DBGridDataSource: handleLoadMoreRows");
+    appLogger.info("_DBGridDataSource: handleLoadMoreRows called. Invoking parent callback.");
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      fetchDataCallback?.call(false);
+      onLoadMoreRequested?.call();
     });
   }
 }

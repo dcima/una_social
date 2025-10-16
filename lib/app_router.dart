@@ -1,8 +1,11 @@
+// app_router.dart /app_router.dart
+//************** INIZIO CODICE DART *******************
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:una_social/screens/contatti/colleghi_screen.dart';
 import 'package:una_social/screens/contatti/import_contacts_screen.dart';
 import 'package:una_social/screens/database/ambiti.dart';
 import 'package:una_social/screens/database/campus.dart';
@@ -15,6 +18,7 @@ import 'package:una_social/screens/database/strutture.dart';
 import 'package:una_social/screens/home_screen.dart';
 import 'package:una_social/controllers/ui_controller.dart';
 import 'package:una_social/screens/login_screen.dart';
+import 'package:una_social/helpers/logger_helper.dart'; // Importa il logger
 
 enum AppRoute {
   login('/login'),
@@ -32,9 +36,8 @@ enum AppRoute {
 
 class AppRouter {
   static final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
-  static final GlobalKey<NavigatorState> _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
+  static final GlobalKey<NavigatorState> shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
-  // *** NUOVA VARIABILE STATICA PER TRACCIARE L'ULTIMO PERCORSO DEI BREADCRUMBS ***
   static String? _lastBreadcrumbPath;
 
   static final GoRouter router = GoRouter(
@@ -46,17 +49,16 @@ class AppRouter {
       final bool loggedIn = Supabase.instance.client.auth.currentUser != null;
       final bool loggingIn = state.matchedLocation == AppRoute.login.path;
 
+      appLogger.info('[AppRouter Redirect] Current URI: ${state.uri}, Matched Location: ${state.matchedLocation}, LoggedIn: $loggedIn');
+
       if (!loggedIn) {
-        // Se non loggato e non sta andando alla pagina di login, reindirizza al login
         return loggingIn ? null : AppRoute.login.path;
       }
 
-      // Se loggato e sta cercando di accedere alla pagina di login, reindirizza alla home
       if (loggingIn) {
         return AppRoute.home.path;
       }
 
-      // Se il percorso cambia a una rotta non-app (es. /login), resetta il tracker
       if (!state.uri.toString().startsWith('/app')) {
         _lastBreadcrumbPath = null;
       }
@@ -69,20 +71,18 @@ class AppRouter {
         builder: (context, state) => const LoginScreen(),
       ),
       ShellRoute(
-        navigatorKey: _shellNavigatorKey,
+        navigatorKey: shellNavigatorKey,
         builder: (context, state, child) {
+          appLogger.info('[AppRouter ShellRoute Builder] Building for URI: ${state.uri}');
           final UiController uiController = Get.find<UiController>();
-          final currentFullPath = state.uri.toString(); // Ottieni il percorso completo attuale
+          final currentFullPath = state.uri.toString();
 
-          // *** APPLICAZIONE DELLA LOGICA DI CONTROLLO ***
-          // Schedula l'aggiornamento dei breadcrumbs solo se il percorso è cambiato
           if (_lastBreadcrumbPath != currentFullPath) {
-            _lastBreadcrumbPath = currentFullPath; // Aggiorna l'ultimo percorso tracciato
+            _lastBreadcrumbPath = currentFullPath;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               uiController.updateBreadcrumbs(UiController.buildBreadcrumbsFromPath(currentFullPath));
             });
           }
-          // *** FINE LOGICA DI CONTROLLO ***
 
           return HomeScreen(
             child: child,
@@ -113,12 +113,13 @@ class AppRouter {
           GoRoute(
             path: AppRoute.colleghi.path,
             name: AppRoute.colleghi.name,
-            builder: (context, state) => const Center(child: Text('Schermata Colleghi')),
+            builder: (context, state) => const ColleghiScreen(),
           ),
           GoRoute(
             path: '${AppRoute.database.path}/:tableName',
             builder: (context, state) {
               final tableName = state.pathParameters['tableName']!;
+              appLogger.info('[AppRouter Database Table Builder] Building for table: $tableName, URI: ${state.uri}');
               switch (tableName.toLowerCase()) {
                 case 'ambiti':
                   return Ambiti();
@@ -167,3 +168,4 @@ class GoRouterRefreshStream extends ChangeNotifier {
     super.dispose();
   }
 }
+//************** FINE CODICE DART *******************

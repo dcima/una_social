@@ -1,3 +1,5 @@
+// database_screen.dart /screens\database\database_screen.dart
+//************** INIZIO CODICE DART *******************
 // lib/screens/database_screen.dart
 // ignore_for_file: avoid_print, use_build_context_synchronously
 
@@ -176,7 +178,9 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
         ),
       ),
       onDoubleTap: () {
-        GoRouter.of(context).go('/app/database/$tableName');
+        final targetPath = '/app/database/$tableName';
+        appLogger.info('[DatabaseScreen] Navigating to: $targetPath (using context.go)');
+        GoRouter.of(context).go(targetPath);
       },
     );
   }
@@ -185,18 +189,15 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
   Widget build(BuildContext context) {
     appLogger.info("DatabaseScreen: build");
     return Obx(() {
-      // Avvolgi il widget in Obx per reagire ai cambiamenti del controller
       final bool isLoading = uiController.isLoadingTables.value;
-      final String errorMessage = uiController.errorMessageForDBTables.value; // Corretto: non più nullable
-      final List<String> tableNames = uiController.tableNames; // Corretto: rimosso .value
+      final String errorMessage = uiController.errorMessageForDBTables.value;
+      final List<String> tableNames = uiController.tableNames;
 
       if (isLoading && tableNames.isEmpty) {
-        // Mostra caricamento solo se non ci sono dati
         return const Center(child: CircularProgressIndicator());
       }
 
       if (errorMessage.isNotEmpty && tableNames.isEmpty) {
-        // Corretto: errorMessage non è più nullable
         return Center(
           child: Padding(
             padding: const EdgeInsets.all(20.0),
@@ -213,7 +214,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  errorMessage, // Usa il messaggio di errore dal controller
+                  errorMessage,
                   style: Theme.of(context).textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
@@ -221,7 +222,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
                 ElevatedButton.icon(
                   icon: const Icon(Icons.refresh),
                   label: const Text('Riprova'),
-                  onPressed: _refreshTableNames, // Chiama il refresh che usa il controller
+                  onPressed: _refreshTableNames,
                   style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Theme.of(context).colorScheme.onPrimary),
                 )
               ],
@@ -231,7 +232,6 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
       }
 
       if (!isLoading && tableNames.isEmpty && errorMessage.isEmpty) {
-        // Corretto: errorMessage non è più nullable
         return Center(
           child: Padding(
             padding: const EdgeInsets.all(20.0),
@@ -255,7 +255,7 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
                 ElevatedButton.icon(
                   icon: const Icon(Icons.refresh),
                   label: const Text('Ricarica'),
-                  onPressed: _refreshTableNames, // Chiama il refresh che usa il controller
+                  onPressed: _refreshTableNames,
                 ),
               ],
             ),
@@ -263,9 +263,8 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
         );
       }
 
-      // Corpo principale con la lista delle tabelle
       return RefreshIndicator(
-        onRefresh: _refreshTableNames, // Aggiunge pull-to-refresh
+        onRefresh: _refreshTableNames,
         child: ListView.separated(
           padding: const EdgeInsets.all(8.0),
           itemCount: tableNames.length,
@@ -273,9 +272,10 @@ class _DatabaseScreenState extends State<DatabaseScreen> {
             final tableName = tableNames[index];
             return buildCard(context, tableName);
           },
-          separatorBuilder: (context, index) => const SizedBox(height: 0), // Nessun separatore visibile tra le Card
+          separatorBuilder: (context, index) => const SizedBox(height: 0),
         ),
       );
     });
   }
 }
+//************** FINE CODICE DART *******************

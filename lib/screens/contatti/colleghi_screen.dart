@@ -18,54 +18,48 @@ class ColleghiScreen extends StatefulWidget {
 }
 
 class _ColleghiScreenState extends State<ColleghiScreen> {
-  // State for loading indicators
-  bool isLoading = true; // General loading state for initial setup
-  bool _isLoadingDropdowns = false; // Loading state for dropdowns
+  bool isLoading = true;
+  bool _isLoadingDropdowns = false;
 
-  // State for Ente and Struttura dropdowns
   String? _selectedEnte;
   int? _selectedStrutturaId;
   String? _selectedStrutturaNome;
 
   List<Map<String, dynamic>> _entiList = [];
-  List<Map<String, dynamic>> _struttureList = []; // Will hold structures for the selected Ente, including "Tutte le strutture"
+  List<Map<String, dynamic>> _struttureList = [];
 
   final AuthController authController = Get.find<AuthController>();
-  // Rimosso l'istanza di UiController da qui, non è più necessaria per initState.
-  // La gestione dei breadcrumbs è centralizzata in AppRouter.
   final PersonaleController personaleController = Get.find<PersonaleController>();
 
-  // Controllers for text fields (for display purposes)
   final TextEditingController _enteController = TextEditingController();
   final TextEditingController _strutturaController = TextEditingController();
 
-  // State for pagination
-  int _currentPage = 0; // Current page index (0-based)
-  final int _pageSize = 25; // Initial page length as requested
-  int _totalRecords = 0; // Total records, updated by DBGridWidget
+  int _currentPage = 0;
+  int _pageSize = 12;
+  int _totalRecords = 0;
 
-  // State for filtering (UI elements for these should be added)
-  String? _currentFilterColumn; // e.g., 'cognome', 'nome', 'email_principale'
+  String? _currentFilterColumn;
   String? _currentFilterValue;
 
-  // State for sorting
   final String _currentSortColumn = 'cognome';
   final String _currentSortDirection = 'asc';
 
-  // Grid columns definition
+  final GlobalKey<State<DBGridWidget>> _dbGridKey = GlobalKey<State<DBGridWidget>>();
+
   final List<GridColumn> columns = [
     GridColumn(columnName: 'photo_url', columnWidthMode: ColumnWidthMode.fitByColumnName, label: const Text('Foto')),
     GridColumn(columnName: 'cognome', columnWidthMode: ColumnWidthMode.fill, label: const Text('Cognome')),
     GridColumn(columnName: 'nome', columnWidthMode: ColumnWidthMode.fill, label: const Text('Nome')),
     GridColumn(columnName: 'email_principale', columnWidthMode: ColumnWidthMode.fill, label: const Text('Email')),
+    GridColumn(columnName: 'ruoli', columnWidthMode: ColumnWidthMode.fill, label: const Text('Ruoli')),
   ];
+
+  final List<int> _pageSizesOptions = [10, 11, 12, 13, 14, 15, 20, 25, 50, 100, 250, 500, 1000, 2500, 5000];
 
   @override
   void initState() {
     super.initState();
     _initializeDropdowns();
-    // Rimosso: uiController.updateBreadcrumbs(UiController.buildBreadcrumbsFromPath('/app/colleghi'));
-    // L'aggiornamento dei breadcrumbs è gestito centralmente dal ShellRoute in app_router.dart
   }
 
   @override
@@ -75,11 +69,9 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     super.dispose();
   }
 
-  // Initializes dropdowns based on user's profile or defaults
   Future<void> _initializeDropdowns() async {
     if (!mounted) return;
 
-    // Set initial loading state and title
     setState(() {
       isLoading = true;
       _isLoadingDropdowns = true;
@@ -103,19 +95,20 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     if (_selectedEnte != 'Tutti gli enti') {
       await _fetchStrutture(_selectedEnte!);
     } else {
-      await _fetchStrutture(null); // Fetch all structures if "Tutti gli enti" is selected
+      await _fetchStrutture(null);
     }
 
-    // Ensure "Tutte le strutture" is always the first option and unique
     if (_struttureList.where((s) => s['id'] == -1).isEmpty) {
       _struttureList.insert(0, {'id': -1, 'nome': 'Tutte le strutture'});
     }
 
+    // *** MODIFICA QUI PER LA SELEZIONE DELLA STRUTTURA ***
     if (userProfileStrutturaId != null && userProfileStrutturaId != -1) {
       final structure = _struttureList.firstWhereOrNull((s) => s['id'] == userProfileStrutturaId);
       if (structure != null) {
         _selectedStrutturaId = userProfileStrutturaId;
         _selectedStrutturaNome = structure['nome'] as String?;
+        // Imposta il testo del controller Struttura
         _strutturaController.text = "$userProfileStrutturaId - $_selectedStrutturaNome";
       } else {
         _selectedStrutturaId = -1;
@@ -128,19 +121,12 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       _strutturaController.text = "Tutte le strutture";
     }
 
-    // _updateScreenTitle() è stato rimosso in quanto il titolo della AppBar
-    // è ora gestito dai breadcrumbs di HomeScreen tramite UiController.
-    // Se la logica del titolo dinamico fosse necessaria per un display interno
-    // al ColleghiScreen, andrebbe utilizzata qui per una variabile di stato locale.
-
-    // Update the UI controller with the final title and set loading to false in one go.
     setState(() {
       isLoading = false;
       _isLoadingDropdowns = false;
     });
   }
 
-  // Fetches the list of entities (Enti)
   Future<void> _fetchEnti() async {
     try {
       final response = await Supabase.instance.client.from('enti').select('ente');
@@ -155,7 +141,6 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     }
   }
 
-  // Fetches structures for a given entity (Ente)
   Future<void> _fetchStrutture(String? ente) async {
     List<Map<String, dynamic>> fetchedStructures = [];
     try {
@@ -187,41 +172,33 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     }
   }
 
-  // _updateScreenTitle() è stato rimosso, in quanto il titolo della AppBar
-  // è ora gestito dai breadcrumbs di HomeScreen tramite UiController.
-  // Se la logica del titolo dinamico fosse necessaria per un display interno
-  // al ColleghiScreen, andrebbe utilizzata qui per una variabile di stato locale.
-
-  // Resets to the first page and triggers state update.
   void _refreshData() {
     setState(() {
-      _currentPage = 0; // Reset to the first page
+      _currentPage = 0;
     });
-    // Rimosso: _updateScreenTitle(); // Non più necessario qui per l'AppBar
   }
 
-  // Handler for Ente dropdown changes
   void _onEnteChanged(String? newValue) async {
     if (newValue == null) return;
 
     setState(() {
       _selectedEnte = newValue;
-      _selectedStrutturaId = null; // Reset structure selection
+      _selectedStrutturaId = null;
       _selectedStrutturaNome = null;
-      _struttureList = []; // Clear current structures (will be refetched by _fetchStrutture)
+      _struttureList = [];
       _strutturaController.clear();
-      _currentPage = 0; // Reset page to 0
+      _currentPage = 0;
     });
 
     _enteController.text = newValue;
 
     if (newValue == 'Tutti gli enti') {
-      await _fetchStrutture(null); // Fetch all structures
+      await _fetchStrutture(null);
       _selectedStrutturaId = -1;
       _selectedStrutturaNome = 'Tutte le strutture';
       _strutturaController.text = "Tutte le strutture";
     } else {
-      await _fetchStrutture(newValue); // Fetch structures for the selected ente
+      await _fetchStrutture(newValue);
       if (_struttureList.where((s) => s['id'] == -1).isEmpty) {
         _struttureList.insert(0, {'id': -1, 'nome': 'Tutte le strutture'});
       }
@@ -241,10 +218,9 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
         }
       }
     }
-    _refreshData(); // Trigger state update, causing DBGridWidget to refetch
+    _refreshData();
   }
 
-  // Handler for Struttura selection changes (from Autocomplete)
   void _onStrutturaSelected(Map<String, dynamic> selectedStructure) {
     final int? newId = selectedStructure['id'] as int?;
     final String? newName = selectedStructure['nome'] as String?;
@@ -254,7 +230,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     setState(() {
       _selectedStrutturaId = newId;
       _selectedStrutturaNome = newName;
-      _currentPage = 0; // Reset page to 0 when Struttura changes
+      _currentPage = 0;
     });
 
     if (newId == -1) {
@@ -262,10 +238,9 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     } else {
       _strutturaController.text = "$newId - $newName";
     }
-    _refreshData(); // Trigger state update
+    _refreshData();
   }
 
-  // Method to go to the previous page
   void _goToPreviousPage() {
     if (_currentPage > 0) {
       setState(() {
@@ -274,7 +249,6 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     }
   }
 
-  // Method to go to the next page
   void _goToNextPage() {
     final int totalPages = (_totalRecords / _pageSize).ceil();
     if (_currentPage < totalPages - 1) {
@@ -284,7 +258,17 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     }
   }
 
-  // Callback to update total records from DBGridWidget
+  void _goToPage(int? pageNumber) {
+    if (pageNumber != null && pageNumber >= 1) {
+      final int totalPages = (_totalRecords / _pageSize).ceil();
+      if (pageNumber <= totalPages) {
+        setState(() {
+          _currentPage = pageNumber - 1;
+        });
+      }
+    }
+  }
+
   void _onDBGridTotalRecordsChanged(int totalRecords) {
     if (mounted) {
       setState(() {
@@ -299,7 +283,24 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     }
   }
 
-  // Builds the Ente dropdown widget
+  void _onLoadMoreRequested() {
+    final int totalPages = (_totalRecords / _pageSize).ceil();
+    if (_currentPage < totalPages - 1) {
+      setState(() {
+        _currentPage++;
+      });
+    }
+  }
+
+  void _onPageSizeChanged(int? newSize) {
+    if (newSize != null && newSize != _pageSize) {
+      setState(() {
+        _pageSize = newSize;
+        _currentPage = 0;
+      });
+    }
+  }
+
   Widget getEnteDropdown() {
     return InputDecorator(
       decoration: InputDecoration(
@@ -322,30 +323,23 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     );
   }
 
-  // Builds the Struttura Autocomplete widget
   Widget getStrutturaAutocomplete() {
     return Autocomplete<Map<String, dynamic>>(
-      key: ValueKey('struttura_autocomplete_$_selectedEnte'), // Key to force rebuild when ente changes
-      fieldViewBuilder: (BuildContext context, TextEditingController textEditingController, FocusNode focusNode, VoidCallback onFieldSubmitted) {
-        _strutturaController.value = textEditingController.value;
-        textEditingController.addListener(() {
-          if (_strutturaController.text != textEditingController.text) {
-            _strutturaController.text = textEditingController.text;
-          }
-        });
-
+      key: ValueKey('struttura_autocomplete_$_selectedEnte'),
+      // *** MODIFICA QUI PER USARE _strutturaController DIRETTAMENTE ***
+      fieldViewBuilder: (BuildContext context, TextEditingController textEditingControllerFromAutocomplete, FocusNode focusNode, VoidCallback onFieldSubmitted) {
         return TextFormField(
-          controller: textEditingController,
+          controller: _strutturaController, // Usa il nostro controller principale
           focusNode: focusNode,
           decoration: InputDecoration(
             labelText: "Struttura",
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            suffixIcon: textEditingController.text.isNotEmpty
+            suffixIcon: _strutturaController.text.isNotEmpty
                 ? IconButton(
                     icon: const Icon(Icons.clear, size: 20),
                     onPressed: () {
-                      textEditingController.clear();
+                      _strutturaController.clear(); // Pulisci il nostro controller
                       _onStrutturaSelected({'id': -1, 'nome': 'Tutte le strutture'});
                       focusNode.unfocus();
                     },
@@ -362,16 +356,19 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
             } else {
               _onStrutturaSelected({'id': -1, 'nome': 'Tutte le strutture'});
             }
-            onFieldSubmitted();
+            // Non chiamare onFieldSubmitted() di Autocomplete qui, la nostra logica _onStrutturaSelected è sufficiente
           },
         );
       },
       optionsBuilder: (TextEditingValue textEditingValue) {
-        if (textEditingValue.text.isEmpty) {
+        // L'optionsBuilder ora leggerà direttamente il testo da _strutturaController
+        // o verrà chiamato con textEditingValue corrispondente
+        if (_strutturaController.text.isEmpty) {
+          // Utilizza _strutturaController.text per coerenza
           return _struttureList;
         }
 
-        final String searchText = textEditingValue.text.toLowerCase();
+        final String searchText = _strutturaController.text.toLowerCase(); // Utilizza _strutturaController.text
         final bool hasDigits = searchText.contains(RegExp(r'\d'));
 
         final List<Map<String, dynamic>> suggestions = [];
@@ -453,7 +450,6 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     );
   }
 
-  // Builds the row containing Ente and Struttura dropdowns
   Widget getSelectionRow() {
     return Container(
       color: const Color.fromARGB(255, 0, 204, 136),
@@ -478,18 +474,15 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     );
   }
 
-  // --- Main Build Method ---
   @override
   Widget build(BuildContext context) {
     final bool showInitialLoading = isLoading || _isLoadingDropdowns;
 
     if (showInitialLoading && (personaleController.personale.value == null && Supabase.instance.client.auth.currentUser != null)) {
-      // Usiamo un Center con CircularProgressIndicator perché lo Scaffold è fornito dal parent.
       return const Center(child: CircularProgressIndicator());
     }
 
     if (personaleController.personale.value == null) {
-      // Usiamo un Center con Text perché lo Scaffold è fornito dal parent.
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -505,6 +498,8 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     final Map<String, dynamic> rpcParams = {
       'p_ente': (_selectedEnte != null && _selectedEnte != 'Tutti gli enti') ? _selectedEnte : null,
       'p_struttura_id': (_selectedStrutturaId != null && _selectedStrutturaId != -1) ? _selectedStrutturaId : null,
+      // *** MODIFICA QUI PER PASSARE IL NOME DELLA STRUTTURA PER IL SNACKBAR ***
+      'p_struttura_display_name': (_selectedStrutturaNome != null && _selectedStrutturaNome != 'Tutte le strutture') ? "$_selectedStrutturaId - $_selectedStrutturaNome" : null,
       'p_filter_column': _currentFilterColumn,
       'p_filter_value': _currentFilterValue,
       'p_limit': _pageSize,
@@ -516,8 +511,8 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
     final dbGridConfig = DBGridConfig(
       columns: columns,
       dataSourceTable: 'colleghi',
-      emptyDataMessage: "Nessun collega trovato per i criteri selezionati.",
-      excludeColumns: ['ente', 'struttura'],
+      emptyDataMessage: "Nessun collega trovato.", // Messaggio generico, sarà sovrascritto da DBGridWidget
+      excludeColumns: ['ente', 'struttura', 'id', 'altre_emails', 'telefoni', 'cv', 'note_biografiche', 'rss', 'web', 'total_count'],
       fixedColumnsCount: 1,
       initialSortBy: [
         SortColumn(column: _currentSortColumn, direction: _currentSortDirection == 'asc' ? SortDirection.asc : SortDirection.desc),
@@ -530,14 +525,15 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
       showHeader: true,
       uiModes: const [UIMode.grid],
       onTotalRecordsChanged: _onDBGridTotalRecordsChanged,
+      onLoadMoreRequested: _onLoadMoreRequested,
+      currentPage: _currentPage,
     );
 
-    final String dynamicKeyString = '${_selectedEnte}_${_selectedStrutturaId}_${_currentPage}_${_pageSize}_${_currentSortColumn}_${_currentSortDirection}_${_currentFilterColumn}_$_currentFilterValue';
-    final ValueKey<String> dbGridKey = ValueKey<String>(dynamicKeyString);
-
     final int totalPages = (_totalRecords / _pageSize).ceil();
+    final int currentPageNumber = _currentPage + 1;
+    final int firstRecordOnPage = _totalRecords > 0 ? (_currentPage * _pageSize) + 1 : 0;
+    final int lastRecordOnPage = _totalRecords > 0 ? ((_currentPage * _pageSize) + _pageSize).clamp(0, _totalRecords) : 0;
 
-    // Rimosso lo Scaffold e l'AppBar, restituisci direttamente la Column
     return Column(
       children: [
         getSelectionRow(),
@@ -546,7 +542,7 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
         else
           Expanded(
             child: DBGridWidget(
-              key: dbGridKey,
+              key: _dbGridKey,
               config: dbGridConfig,
             ),
           ),
@@ -554,16 +550,49 @@ class _ColleghiScreenState extends State<ColleghiScreen> {
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                SizedBox(
+                  width: 100,
+                  child: DropdownButtonFormField<int>(
+                    initialValue: _pageSize,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _pageSizesOptions.map((size) => DropdownMenuItem<int>(value: size, child: Text('$size'))).toList(),
+                    onChanged: _onPageSizeChanged,
+                  ),
+                ),
+                const SizedBox(width: 16),
                 IconButton(
                   icon: const Icon(Icons.arrow_back),
                   onPressed: _currentPage > 0 ? _goToPreviousPage : null,
                 ),
-                Text('Pag. ${_currentPage + 1}/$totalPages'),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 80,
+                  child: DropdownButtonFormField<int>(
+                    initialValue: currentPageNumber,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      border: OutlineInputBorder(),
+                    ),
+                    items: List.generate(totalPages > 0 ? totalPages : 1, (index) => index + 1).map((page) => DropdownMenuItem<int>(value: page, child: Text('$page'))).toList(),
+                    onChanged: _goToPage,
+                  ),
+                ),
+                Text('/$totalPages'),
+                const SizedBox(width: 8),
                 IconButton(
                   icon: const Icon(Icons.arrow_forward),
                   onPressed: _currentPage < totalPages - 1 ? _goToNextPage : null,
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  _totalRecords > 0 ? 'Record $firstRecordOnPage-$lastRecordOnPage di $_totalRecords' : 'Record 0-0 di $_totalRecords',
                 ),
               ],
             ),

@@ -1,3 +1,5 @@
+// home_screen.dart /screens\home_screen.dart
+//************** INIZIO CODICE DART *******************
 // lib/screens/home_screen.dart
 // ignore_for_file: avoid_print, deprecated_member_use, use_build_context_synchronously
 
@@ -21,6 +23,7 @@ import 'package:una_social/painters/star_painter.dart';
 import 'package:una_social/screens/esterni_profile.dart';
 import 'package:una_social/screens/personale_profile.dart';
 import 'package:una_social/app_router.dart'; // Importa AppRoute
+import 'package:una_social/helpers/logger_helper.dart'; // Importa il logger
 
 enum ProfileAction { edit, logout, version }
 
@@ -174,7 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _promptToCompleteProfile(User authUser) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _showSnackbar("Per favore, completa il tuo profilo.");
+      _showSnackbar("Per favor, completa il tuo profilo.");
       final newEsternoProfile = Esterni(
         id: '',
         authUuid: authUser.id,
@@ -212,7 +215,8 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Database'),
         onTap: () {
           _handleDrawerTap(() {
-            // Usa il wrapper _handleDrawerTap
+            final currentUri = GoRouter.of(context).routerDelegate.currentConfiguration.uri.toString();
+            appLogger.info('[HomeScreen Drawer] Current URI before navigating to Database: $currentUri');
             GoRouter.of(context).go(AppRoute.database.path);
             Navigator.of(context).pop();
           });
@@ -253,7 +257,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           title: const Text('Home'),
                           onTap: () {
                             _handleDrawerTap(() {
-                              // Usa il wrapper _handleDrawerTap
+                              final currentUri = GoRouter.of(context).routerDelegate.currentConfiguration.uri.toString();
+                              appLogger.info('[HomeScreen Drawer] Current URI before navigating to Home: $currentUri');
                               GoRouter.of(context).go(AppRoute.home.path);
                               Navigator.of(context).pop();
                             });
@@ -265,7 +270,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           title: const Text('Chat'),
                           onTap: () {
                             _handleDrawerTap(() {
-                              // Usa il wrapper _handleDrawerTap
+                              final currentUri = GoRouter.of(context).routerDelegate.currentConfiguration.uri.toString();
+                              appLogger.info('[HomeScreen Drawer] Current URI before navigating to Chat: $currentUri');
                               GoRouter.of(context).go(AppRoute.chat.path);
                               Navigator.of(context).pop();
                             });
@@ -276,7 +282,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           title: const Text('Importa Contatti'),
                           onTap: () {
                             _handleDrawerTap(() {
-                              // Usa il wrapper _handleDrawerTap
+                              final currentUri = GoRouter.of(context).routerDelegate.currentConfiguration.uri.toString();
+                              appLogger.info('[HomeScreen Drawer] Current URI before navigating to Import Contacts: $currentUri');
                               GoRouter.of(context).go(AppRoute.importContacts.path);
                               Navigator.of(context).pop();
                             });
@@ -292,7 +299,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildBreadcrumbsWidget(BuildContext context) {
+  Widget _buildBreadcrumbsWidget(BuildContext contextForNavigation) {
     return Obx(() {
       final breadcrumbs = uiController.breadcrumbs;
       if (breadcrumbs.isEmpty) {
@@ -316,7 +323,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 GestureDetector(
                   onTap: () {
                     if (!isLast) {
-                      GoRouter.of(context).go(item.path);
+                      final currentUri = GoRouter.of(contextForNavigation).routerDelegate.currentConfiguration.uri.toString();
+                      appLogger.info('[HomeScreen Breadcrumb] Current URI: $currentUri, Navigating to: ${item.path} (using context.go)');
+                      contextForNavigation.go(item.path);
                     }
                   },
                   child: Row(
@@ -361,6 +370,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final currentGridConfig = (widget.child is DBGridProvider) ? (widget.child as DBGridProvider).dbGridConfig : null;
     final canToggleView = canShowDbGridControls && (currentGridConfig?.uiModes.length ?? 0) > 1;
 
+    final BuildContext? shellNavContext = AppRouter.shellNavigatorKey.currentContext;
+
+    // Logga il percorso corrente quando il widget HomeScreen viene ricostruito
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && shellNavContext != null) {
+        final currentUri = GoRouter.of(shellNavContext).routerDelegate.currentConfiguration.uri.toString();
+        appLogger.info('[HomeScreen Build] Current ShellRoute URI: $currentUri');
+      }
+    });
+
     return Scaffold(
       drawer: _buildDrawer(context, isDesktop ? 250.0 : screenWidth * 0.8, 80.0, 40.0 * 0.8),
       body: SafeArea(
@@ -378,7 +397,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 8),
                     const Text('Una Social', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(width: 12),
-                    Expanded(child: _buildBreadcrumbsWidget(context)),
+                    Expanded(child: shellNavContext != null ? _buildBreadcrumbsWidget(shellNavContext) : const SizedBox.shrink()),
                     if (canShowDbGridControls) ...[
                       IconButton(tooltip: "Ricarica Dati", icon: const Icon(Icons.refresh), onPressed: currentDbGridControl.refreshData),
                       if (canToggleView) IconButton(tooltip: "Cambia vista", icon: const Icon(Icons.view_quilt_outlined), onPressed: _handleToggleView),
@@ -461,3 +480,4 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+//************** FINE CODICE DART *******************
